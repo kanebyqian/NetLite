@@ -48,13 +48,13 @@ async fn main() {
         gpui_component::init(cx);
         info!("=== gpui_component::init() 完成 ===");
 
-        // 加载嵌入的 Sarasa UI SC（更纱黑体 UI SC）字体
-        // 覆盖英文和中文字符，无需系统字体回退
+        // 加载嵌入的 JetBrains Mono 字体
+        // 覆盖英文和数字，中文使用系统回退字体
         let font_data: Vec<Cow<'static, [u8]>> = Fonts::iter()
             .filter_map(|path| Fonts::get(&path).map(|f| Cow::Owned(f.data.to_vec())))
             .collect();
         match cx.text_system().add_fonts(font_data) {
-            Ok(_) => info!("=== Sarasa UI SC 字体加载完成 ==="),
+            Ok(_) => info!("=== JetBrains Mono 字体加载完成 ==="),
             Err(e) => error!("=== 字体加载失败: {:?} ===", e),
         }
 
