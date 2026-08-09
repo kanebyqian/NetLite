@@ -8,7 +8,7 @@ use std::borrow::Cow;
 #[folder = "assets/icons"]
 pub struct CustomIcons;
 
-// 字体资源（Sarasa UI SC 更纱黑体 UI SC，覆盖中英文）
+// 字体资源（JetBrains Mono，覆盖英文/数字）
 #[derive(RustEmbed)]
 #[folder = "assets/fonts"]
 #[include = "*.ttf"]
