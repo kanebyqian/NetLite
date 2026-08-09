@@ -162,6 +162,7 @@ jobs:
             artifacts/NetLite-windows-x86_64/NetLite-windows-x86_64.zip
             artifacts/NetLite-linux-x86_64/NetLite-linux-x86_64.tar.gz
             artifacts/NetLite-macos-x86_64/NetLite-macos-x86_64.tar.gz
+            artifacts/NetLite-macos-aarch64/NetLite-macos-aarch64.tar.gz
           name: NetLite ${{ steps.get_version.outputs.VERSION }}
           body: |
             ## NetLite ${{ steps.get_version.outputs.VERSION }}
@@ -173,6 +174,7 @@ jobs:
             | Windows | x86_64 | [NetLite-windows-x86_64.zip](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-windows-x86_64.zip) |
             | Linux | x86_64 | [NetLite-linux-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-x86_64.tar.gz) |
             | macOS | x86_64 (Intel) | [NetLite-macos-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-x86_64.tar.gz) |
+            | macOS | aarch64 (Apple Silicon) | [NetLite-macos-aarch64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-aarch64.tar.gz) |
 
             ### 快速开始
 
