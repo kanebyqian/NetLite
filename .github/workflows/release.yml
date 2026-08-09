@@ -158,7 +158,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/*/*
+          files: |
+            artifacts/NetLite-windows-x86_64/NetLite-windows-x86_64.zip
+            artifacts/NetLite-linux-x86_64/NetLite-linux-x86_64.tar.gz
+            artifacts/NetLite-macos-x86_64/NetLite-macos-x86_64.tar.gz
           name: NetLite ${{ steps.get_version.outputs.VERSION }}
           body: |
             ## NetLite ${{ steps.get_version.outputs.VERSION }}
