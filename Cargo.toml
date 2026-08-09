@@ -1,0 +1,43 @@
+[package]
+name = "NetLite"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", features = ["tree-sitter"] }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1.49", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
+bytes = "1.4"
+tokio-serde = "0.8"
+smol = "2.0"
+hex = "0.4"
+log = "0.4"
+simple_logger = "4.0"
+textwrap = "0.16"
+rust-embed = "8.0.0"
+lazy_static = "1.4"
+ipnet = { version = "2.0", features = ["serde"] }
+winapi = { version = "0.3", features = ["iphlpapi", "winerror", "ws2tcpip", "ws2def", "ws2ipdef", "iptypes"] }
+rfd = "0.15"
+dirs = "5"
+
+[build-dependencies]
+winres = "0.1"
+chrono = "0.4"
+
+[package.metadata.appimage]
+name = "NetLite"
+comment = "NetLite - 多协议网络调试工具"
+icon = "assets/icon/icon_256x256.png"
+categories = ["Development", "Network"]
+terminal = false
+

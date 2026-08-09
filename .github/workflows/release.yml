@@ -1,0 +1,240 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+            asset_name: NetLite-windows-x86_64
+          - os: ubuntu-22.04
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+            asset_name: NetLite-linux-x86_64
+          - os: ubuntu-22.04
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
+            asset_name: NetLite-linux-aarch64
+          - os: macos-latest
+            arch: x86_64
+            target: x86_64-apple-darwin
+            asset_name: NetLite-macos-x86_64
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+            asset_name: NetLite-macos-aarch64
+          - os: macos-latest
+            arch: universal
+            target: universal-apple-darwin
+            asset_name: NetLite-macos-universal
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install dependencies (Ubuntu x86_64)
+        if: matrix.os == 'ubuntu-22.04' && matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-x11-dev
+
+      - name: Install dependencies (Ubuntu aarch64)
+        if: matrix.os == 'ubuntu-22.04' && matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxkbcommon-x11-dev
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest' && matrix.arch != 'universal'
+        run: |
+          brew install openssl
+
+      - name: Build release (native / aarch64 cross)
+        if: matrix.arch != 'universal'
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            cargo build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Build release (macOS universal2)
+        if: matrix.arch == 'universal'
+        run: |
+          # Build both architectures and merge with lipo
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create \
+            target/x86_64-apple-darwin/release/NetLite \
+            target/aarch64-apple-darwin/release/NetLite \
+            -output target/universal-apple-darwin/release/NetLite
+
+      - name: Prepare artifact (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target\${{ matrix.target }}\release\NetLite.exe -DestinationPath ${{ matrix.asset_name }}.zip
+
+      - name: Prepare artifact (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          strip target/${{ matrix.target }}/release/NetLite || true
+          tar -czf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release NetLite
+
+      - name: Prepare artifact (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          strip target/${{ matrix.target }}/release/NetLite || true
+          tar -czf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release NetLite
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: |
+            ${{ matrix.os == 'windows-latest' && format('{0}.zip', matrix.asset_name) || format('{0}.tar.gz', matrix.asset_name) }}
+          retention-days: 14
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Get commit history
+        id: get_commits
+        run: |
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          ALL_TAGS=$(git tag -l | sort -Vr)
+          PREVIOUS_TAG=""
+          found_current=false
+          for tag in $ALL_TAGS; do
+            if [ "$found_current" = true ]; then
+              PREVIOUS_TAG=$tag
+              break
+            fi
+            if [ "$tag" = "$CURRENT_TAG" ]; then
+              found_current=true
+            fi
+          done
+
+          REPO_URL=$(git config --get remote.origin.url | sed 's/\.git$//')
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%H %s" --no-merges)
+          else
+            COMMITS=$(git log $PREVIOUS_TAG..$CURRENT_TAG --pretty=format:"%H %s" --no-merges)
+          fi
+
+          FORMATTED_COMMITS=$(echo "$COMMITS" | while IFS= read -r line; do
+            hash=$(echo "$line" | cut -d ' ' -f 1)
+            msg=$(echo "$line" | cut -d ' ' -f 2-)
+            if [[ ! "$msg" =~ ^build: && ! "$msg" =~ ^doc: ]]; then
+              echo "- [$msg]($REPO_URL/commit/$hash)"
+            fi
+          done)
+
+          echo "COMMITS<<EOF" >> $GITHUB_OUTPUT
+          echo "$FORMATTED_COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*/*
+          name: NetLite ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## NetLite ${{ steps.get_version.outputs.VERSION }}
+
+            ### 下载
+
+            | 平台 | 架构 | 文件 |
+            |------|------|------|
+            | Windows | x86_64 | [NetLite-windows-x86_64.zip](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-windows-x86_64.zip) |
+            | Linux | x86_64 | [NetLite-linux-x86_64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-x86_64.tar.gz) |
+            | Linux | aarch64 | [NetLite-linux-aarch64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-aarch64.tar.gz) |
+            | macOS | x86_64 (Intel) | [NetLite-macos-x86_64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-x86_64.tar.gz) |
+            | macOS | aarch64 (Apple Silicon) | [NetLite-macos-aarch64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-aarch64.tar.gz) |
+            | macOS | universal | [NetLite-macos-universal.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-universal.tar.gz) |
+
+            ### 快速开始
+
+            #### Windows
+            ```bash
+            winget install SunJary.NetLite
+            ```
+            或下载 `NetLite-windows-x86_64.zip` 解压后运行 `NetLite.exe`。
+
+            #### Linux
+            ```bash
+            tar -xzf NetLite-linux-x86_64.tar.gz
+            chmod +x NetLite
+            ./NetLite
+            ```
+
+            #### macOS
+            ```bash
+            tar -xzf NetLite-macos-universal.tar.gz
+            chmod +x NetLite
+            open NetLite.app  # 或直接运行 ./NetLite
+            ```
+
+            ### 系统要求
+
+            - **Windows**: 10 或更高版本
+            - **Linux**: GTK3 库 (`libgtk-3-dev` 等)
+            - **macOS**: 10.15 或更高版本
+
+            ${{ steps.get_commits.outputs.COMMITS }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
