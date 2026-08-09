@@ -711,7 +711,7 @@ fn get_local_ip_and_mask() -> Option<(Ipv4Addr, Ipv4Addr)> {
         let _ = udp.connect(("8.8.8.8", 53));
         let local_addr = udp.local_addr().ok()?;
         let local_ip = match local_addr {
-            std::net::SocketAddr::V4(addr) => addr.ip(),
+            std::net::SocketAddr::V4(addr) => *addr.ip(),
             _ => return None,
         };
         let mask = Ipv4Addr::new(255, 255, 255, 0);
