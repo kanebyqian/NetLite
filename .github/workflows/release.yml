@@ -83,20 +83,26 @@ jobs:
         if: matrix.os == 'ubuntu-22.04'
         run: |
           strip target/${{ matrix.target }}/release/NetLite || true
-          tar -czf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release NetLite
 
       - name: Prepare artifact (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           strip target/${{ matrix.target }}/release/NetLite || true
-          tar -czf ${{ matrix.asset_name }}.tar.gz -C target/${{ matrix.target }}/release NetLite
 
-      - name: Upload artifact
+      - name: Upload artifact (Windows)
+        if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: |
-            ${{ matrix.os == 'windows-latest' && format('{0}.zip', matrix.asset_name) || format('{0}.tar.gz', matrix.asset_name) }}
+          path: ${{ matrix.asset_name }}.zip
+          retention-days: 14
+
+      - name: Upload artifact (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: target/${{ matrix.target }}/release/NetLite
           retention-days: 14
 
   release:
@@ -110,6 +116,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f
 
       - name: Get version from tag
         id: get_version
@@ -155,54 +164,116 @@ jobs:
           echo "$FORMATTED_COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            artifacts/NetLite-windows-x86_64/NetLite-windows-x86_64.zip
-            artifacts/NetLite-linux-x86_64/NetLite-linux-x86_64.tar.gz
-            artifacts/NetLite-macos-x86_64/NetLite-macos-x86_64.tar.gz
-            artifacts/NetLite-macos-aarch64/NetLite-macos-aarch64.tar.gz
-          name: NetLite ${{ steps.get_version.outputs.VERSION }}
-          body: |
-            ## NetLite ${{ steps.get_version.outputs.VERSION }}
-
-            ### 下载
-
-            | 平台 | 架构 | 文件 |
-            |------|------|------|
-            | Windows | x86_64 | [NetLite-windows-x86_64.zip](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-windows-x86_64.zip) |
-            | Linux | x86_64 | [NetLite-linux-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-x86_64.tar.gz) |
-            | macOS | x86_64 (Intel) | [NetLite-macos-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-x86_64.tar.gz) |
-            | macOS | aarch64 (Apple Silicon) | [NetLite-macos-aarch64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-aarch64.tar.gz) |
-
-            ### 快速开始
-
-            #### Windows
-            下载 `NetLite-windows-x86_64.zip` 解压后运行 `NetLite.exe`。
-
-            #### Linux
-            ```bash
-            tar -xzf NetLite-linux-x86_64.tar.gz
-            chmod +x NetLite
-            ./NetLite
-            ```
-
-            #### macOS
-            ```bash
-            tar -xzf NetLite-macos-x86_64.tar.gz
-            chmod +x NetLite
-            ./NetLite
-            ```
-
-            ### 系统要求
-
-            - **Windows**: 10 或更高版本
-            - **Linux**: GTK3 库 (`libgtk-3-dev` 等)
-            - **macOS**: 10.15 或更高版本
-
-            ${{ steps.get_commits.outputs.COMMITS }}
-          draft: false
-          prerelease: false
+      - name: Create Release Body File
+        id: create_body
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          COMMITS: ${{ steps.get_commits.outputs.COMMITS }}
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## NetLite VERSION_PLACEHOLDER
+
+          ### 下载
+
+          | 平台 | 架构 | 文件 |
+          |------|------|------|
+          | Windows | x86_64 | [NetLite-windows-x86_64.zip](https://github.com/kanebyqian/NetLite/releases/download/VERSION_PLACEHOLDER/NetLite-windows-x86_64.zip) |
+          | Linux | x86_64 | [NetLite-linux-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/VERSION_PLACEHOLDER/NetLite-linux-x86_64.tar.gz) |
+          | macOS | x86_64 (Intel) | [NetLite-macos-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/VERSION_PLACEHOLDER/NetLite-macos-x86_64.tar.gz) |
+          | macOS | aarch64 (Apple Silicon) | [NetLite-macos-aarch64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/VERSION_PLACEHOLDER/NetLite-macos-aarch64.tar.gz) |
+
+          ### 快速开始
+
+          #### Windows
+          下载 \`NetLite-windows-x86_64.zip\` 解压后运行 \`NetLite.exe\`。
+
+          #### Linux
+          \`\`\`bash
+          tar -xzf NetLite-linux-x86_64.tar.gz
+          chmod +x NetLite
+          ./NetLite
+          \`\`\`
+
+          #### macOS
+          \`\`\`bash
+          tar -xzf NetLite-macos-x86_64.tar.gz
+          chmod +x NetLite
+          ./NetLite
+          \`\`\`
+
+          ### 系统要求
+
+          - **Windows**: 10 或更高版本
+          - **Linux**: GTK3 库 (\`libgtk-3-dev\` 等)
+          - **macOS**: 10.15 或更高版本
+
+          COMMITS_PLACEHOLDER
+          EOF
+          # Replace version placeholder
+          sed -i "s|VERSION_PLACEHOLDER|${VERSION}|g" release_notes.md
+          # Replace commits placeholder
+          if [ -n "$COMMITS" ]; then
+            sed -i "/^COMMITS_PLACEHOLDER$/d" release_notes.md
+            printf '%s\n' "${COMMITS}" >> release_notes.md
+          else
+            sed -i "/^COMMITS_PLACEHOLDER$/d" release_notes.md
+          fi
+          echo "=== Release Notes ==="
+          cat release_notes.md
+
+      - name: Create Release
+        run: |
+          gh release create "$VERSION" \
+            --title "NetLite $VERSION" \
+            --notes-file release_notes.md \
+            --draft=false \
+            --prerelease=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+          COMMITS: ${{ steps.get_commits.outputs.COMMITS }}
+
+      - name: Prepare Release Assets
+        run: |
+          mkdir -p release-assets
+
+          # Windows: artifact contains NetLite-windows-x86_64.zip
+          if [ -f artifacts/NetLite-windows-x86_64/NetLite-windows-x86_64.zip ]; then
+            cp artifacts/NetLite-windows-x86_64/NetLite-windows-x86_64.zip release-assets/
+            echo "Copied Windows zip"
+          fi
+
+          # Linux: artifact contains raw NetLite binary, create tar.gz
+          if [ -f artifacts/NetLite-linux-x86_64/NetLite ]; then
+            tar -czf release-assets/NetLite-linux-x86_64.tar.gz -C artifacts/NetLite-linux-x86_64 NetLite
+            echo "Created Linux tar.gz"
+          fi
+
+          # macOS x86_64
+          if [ -f artifacts/NetLite-macos-x86_64/NetLite ]; then
+            tar -czf release-assets/NetLite-macos-x86_64.tar.gz -C artifacts/NetLite-macos-x86_64 NetLite
+            echo "Created macOS x86_64 tar.gz"
+          fi
+
+          # macOS aarch64
+          if [ -f artifacts/NetLite-macos-aarch64/NetLite ]; then
+            tar -czf release-assets/NetLite-macos-aarch64.tar.gz -C artifacts/NetLite-macos-aarch64 NetLite
+            echo "Created macOS aarch64 tar.gz"
+          fi
+
+          echo "=== Release assets ==="
+          ls -la release-assets/
+
+      - name: Upload Release Assets
+        run: |
+          set -e
+          for f in release-assets/*; do
+            if [ -f "$f" ]; then
+              echo "Uploading: $f"
+              gh release upload "$VERSION" "$f" --clobber
+            fi
+          done
+          echo "All assets uploaded successfully"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
