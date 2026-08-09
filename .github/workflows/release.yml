@@ -111,6 +111,9 @@ jobs:
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Get commit history
         id: get_commits
         run: |
