@@ -11,6 +11,7 @@ use gpui_component::tooltip::Tooltip;
 use ipnet::Ipv4Net;
 use log::debug;
 use std::net::Ipv4Addr;
+use std::os::windows::process::CommandExt;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -903,9 +904,11 @@ fn probe_ip_ping(ip: Ipv4Addr) -> Result<Duration, anyhow::Error> {
 
     // 判断当前系统，执行对应的 ping 命令
     let output = if cfg!(target_os = "windows") {
+        // CREATE_NO_WINDOW = 0x08000000 — 隐藏子进程控制台窗口
         std::process::Command::new("ping")
             .args(["-n", "1", "-w", "3000"])
             .arg(ip.to_string())
+            .creation_flags(0x08000000)
             .output()
     } else {
         std::process::Command::new("ping")
