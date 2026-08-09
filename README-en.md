@@ -17,16 +17,12 @@ NetLite is a **cross-platform network tool box** built with Rust and the GPUI fr
 
 ## Features
 
-### Network Debugging
 - **TCP/UDP Dual Protocol** — Full support for TCP and UDP in both client and server modes
 - **IPv4 / IPv6 Dual Stack** — Works with both IP versions
 - **Multiple TCP Decoders** — Raw bytes, line-based, length-prefixed, and JSON decoding for flexible protocol adaptation
 - **Chat-style Message Display** — Intuitive visualization of send/receive interactions
-- **Auto-reply** — Automatically respond with preset content when messages are received
-- **Periodic Send** — Timed repeated message sending for stress testing
+- **Auto-reply / Periodic Send** — Auto-respond with preset content on received messages; timed repeated sending for stress testing
 - **Configuration Persistence** — Connection configs are auto-saved and restored on restart
-
-### Built-in Tools
 - **IP Address Calculator** — Input CIDR notation (e.g., `192.168.1.0/24`) or a plain IP (e.g., `192.168.1.1`) to instantly compute network address, subnet mask, broadcast address, usable host count, and address range
 - **IP Address Scanner** — Input a CIDR range (e.g., `192.168.1.0/24`), address range (e.g., `192.168.1.1-100`), or single IP (e.g., `192.168.1.1`) to quickly probe host reachability
 
@@ -77,15 +73,13 @@ sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev 
 
 ### Usage
 
-#### Network Debugging
-
 1. **Create Connection** — Click `+` in the left panel, select type (client/server), protocol (TCP/UDP), address and port
 2. **Connect** — Click `[Connect]` for clients, `[Start]` for servers
 3. **Switch Encoding** — Choose text or hex mode above the input field
 4. **Send Messages** — Type in the bottom input field, click `[Send]` or press Enter
 5. **Manage Connections** — Switch tabs to change connections; click `×` on a tab to close; right-click a connection to delete its saved config
 
-#### Built-in Tools
+### Built-in Tools
 
 Click a tool card on the home page:
 
