@@ -112,20 +112,14 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          path: artifacts
-
-      - name: List downloaded artifacts
-        run: find artifacts -type f
+          fetch-depth: 0
 
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Checkout code
-        uses: actions/checkout@v4
 
       - name: Get commit history
         id: get_commits
@@ -163,6 +157,11 @@ jobs:
           echo "COMMITS<<EOF" >> $GITHUB_OUTPUT
           echo "$FORMATTED_COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Create Release Body File
         id: create_body
