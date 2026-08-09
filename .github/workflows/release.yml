@@ -36,6 +36,10 @@ jobs:
             arch: x86_64
             target: x86_64-apple-darwin
             asset_name: NetLite-macos-x86_64
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+            asset_name: NetLite-macos-aarch64
 
     steps:
       - name: Checkout code
