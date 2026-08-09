@@ -123,7 +123,7 @@ The executable will be in `target/release/`.
 | [Tokio](https://tokio.rs/) | Async runtime |
 | [ipnet](https://crates.io/crates/ipnet) | IPv4/IPv6 address handling |
 | [Serde](https://crates.io/crates/serde) | Data serialization |
-| [NetAssistant](https://github.com/SunJary/NetAssistant) | 网络调试工具 |
+| [NetAssistant](https://github.com/SunJary/NetAssistant) | network debugging tool |
 
 ## License
 
