@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**轻巧 · 简单 · 实用 — 跨平台网络调试工具**
+**轻巧 · 简单 · 实用 — 跨平台网络工具箱**
 
 [![Rust](https://img.shields.io/badge/Rust-2024-orange.svg)](https://www.rust-lang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -13,7 +13,7 @@ English | [中文](README.md)
 
 ## 简介
 
-NetLite 是一个基于 Rust 和 GPUI 框架构建的**跨平台网络调试工具**，支持 Windows、Linux 和 macOS。它集成了网络通信调试、IP 网络计算等常用功能，界面简洁、启动快速，是开发者和网络工程师的得力助手。
+NetLite 是一个基于 Rust 和 GPUI 框架构建的**跨平台网络工具箱**，支持 Windows、Linux 和 macOS。它集成了网络通信调试、IP 网络计算等常用功能，界面简洁、启动快速，是开发者和网络工程师的得力助手。
 
 ## 功能特性
 
@@ -48,7 +48,7 @@ NetLite 是一个基于 Rust 和 GPUI 框架构建的**跨平台网络调试工�
 
 ### 安装
 
-从 [GitHub Release](https://github.com/sunjary/NetLite/releases) 下载对应平台的最新版本：
+从 [GitHub Release](https://github.com/kanebyqian/NetLite/releases) 下载对应平台的最新版本：
 
 #### Windows
 
@@ -113,7 +113,7 @@ NetLite/
 ## 从源码编译
 
 ```bash
-git clone https://github.com/sunjary/NetLite.git
+git clone https://github.com/kanebyqian/NetLite.git
 cd NetLite
 cargo build --release
 ```
@@ -129,6 +129,7 @@ cargo build --release
 | [Tokio](https://tokio.rs/) | 异步运行时 |
 | [ipnet](https://crates.io/crates/ipnet) | IPv4/IPv6 地址处理 |
 | [Serde](https://crates.io/crates/serde) | 数据序列化 |
+| [NetAssistant](https://github.com/SunJary/NetAssistant) | 网络工具箱 |
 
 ## 许可证
 

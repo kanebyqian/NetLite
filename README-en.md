@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Lightweight · Simple · Practical — Cross-Platform Network Debugging Tool**
+**Lightweight · Simple · Practical — Cross-Platform network tool box**
 
 [![Rust](https://img.shields.io/badge/Rust-2024-orange.svg)](https://www.rust-lang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -13,7 +13,7 @@ English | [中文](README.md)
 
 ## Introduction
 
-NetLite is a **cross-platform network debugging tool** built with Rust and the GPUI framework, supporting Windows, Linux, and macOS. It integrates common tools for network communication debugging and IP network calculation with a clean interface and fast startup — designed for developers and network engineers.
+NetLite is a **cross-platform network tool box** built with Rust and the GPUI framework, supporting Windows, Linux, and macOS. It integrates common tools for network communication debugging and IP network calculation with a clean interface and fast startup — designed for developers and network engineers.
 
 ## Features
 
@@ -48,7 +48,7 @@ NetLite is a **cross-platform network debugging tool** built with Rust and the G
 
 ### Installation
 
-Download from [GitHub Releases](https://github.com/sunjary/NetLite/releases):
+Download from [GitHub Releases](https://github.com/kanebyqian/NetLite/releases):
 
 #### Windows
 
@@ -113,7 +113,7 @@ NetLite/
 ## Build from Source
 
 ```bash
-git clone https://github.com/sunjary/NetLite.git
+git clone https://github.com/kanebyqian/NetLite.git
 cd NetLite
 cargo build --release
 ```
@@ -129,6 +129,7 @@ The executable will be in `target/release/`.
 | [Tokio](https://tokio.rs/) | Async runtime |
 | [ipnet](https://crates.io/crates/ipnet) | IPv4/IPv6 address handling |
 | [Serde](https://crates.io/crates/serde) | Data serialization |
+| [NetAssistant](https://github.com/SunJary/NetAssistant) | 网络调试工具 |
 
 ## License
 
