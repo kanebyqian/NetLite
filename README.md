@@ -7,7 +7,7 @@
 [![Rust](https://img.shields.io/badge/Rust-2026-orange.svg)](https://www.rust-lang.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-English | [中文](README.md)
+[English](README-en.md) | 中文
 
 </div>
 
