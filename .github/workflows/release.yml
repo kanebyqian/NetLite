@@ -198,20 +198,17 @@ jobs:
 
             | 平台 | 架构 | 文件 |
             |------|------|------|
-            | Windows | x86_64 | [NetLite-windows-x86_64.zip](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-windows-x86_64.zip) |
-            | Linux | x86_64 | [NetLite-linux-x86_64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-x86_64.tar.gz) |
-            | Linux | aarch64 | [NetLite-linux-aarch64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-aarch64.tar.gz) |
-            | macOS | x86_64 (Intel) | [NetLite-macos-x86_64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-x86_64.tar.gz) |
-            | macOS | aarch64 (Apple Silicon) | [NetLite-macos-aarch64.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-aarch64.tar.gz) |
-            | macOS | universal | [NetLite-macos-universal.tar.gz](https://github.com/sunjary/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-universal.tar.gz) |
+            | Windows | x86_64 | [NetLite-windows-x86_64.zip](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-windows-x86_64.zip) |
+            | Linux | x86_64 | [NetLite-linux-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-x86_64.tar.gz) |
+            | Linux | aarch64 | [NetLite-linux-aarch64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-linux-aarch64.tar.gz) |
+            | macOS | x86_64 (Intel) | [NetLite-macos-x86_64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-x86_64.tar.gz) |
+            | macOS | aarch64 (Apple Silicon) | [NetLite-macos-aarch64.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-aarch64.tar.gz) |
+            | macOS | universal | [NetLite-macos-universal.tar.gz](https://github.com/kanebyqian/NetLite/releases/download/${{ steps.get_version.outputs.VERSION }}/NetLite-macos-universal.tar.gz) |
 
             ### 快速开始
 
             #### Windows
-            ```bash
-            winget install SunJary.NetLite
-            ```
-            或下载 `NetLite-windows-x86_64.zip` 解压后运行 `NetLite.exe`。
+            下载 `NetLite-windows-x86_64.zip` 解压后运行 `NetLite.exe`。
 
             #### Linux
             ```bash
@@ -224,7 +221,7 @@ jobs:
             ```bash
             tar -xzf NetLite-macos-universal.tar.gz
             chmod +x NetLite
-            open NetLite.app  # 或直接运行 ./NetLite
+            ./NetLite
             ```
 
             ### 系统要求
