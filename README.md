@@ -129,7 +129,7 @@ cargo build --release
 | [Tokio](https://tokio.rs/) | 异步运行时 |
 | [ipnet](https://crates.io/crates/ipnet) | IPv4/IPv6 地址处理 |
 | [Serde](https://crates.io/crates/serde) | 数据序列化 |
-| [NetAssistant](https://github.com/SunJary/NetAssistant) | 网络工具箱 |
+| [NetAssistant](https://github.com/SunJary/NetAssistant) | 网络调试工具 |
 
 ## 许可证
 
