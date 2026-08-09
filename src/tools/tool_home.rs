@@ -4,6 +4,7 @@ use gpui_component::StyledExt;
 use gpui_component::{Icon, IconName};
 use gpui_component::ActiveTheme as _;
 use gpui_component::input::Input;
+use gpui_component::scroll::ScrollableElement;
 
 use crate::app::NetLiteApp;
 use crate::tools::{AVAILABLE_TOOLS, CurrentView};
@@ -33,6 +34,7 @@ impl<'a> ToolHomePage<'a> {
             .child(self.render_header(&theme, cx))
             .child(self.render_search_bar(&theme, cx))
             .child(self.render_tools_grid(&theme, cx))
+            .overflow_y_scrollbar()
     }
 
     /// 渲染顶部标题区域

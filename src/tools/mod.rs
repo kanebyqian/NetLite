@@ -31,21 +31,21 @@ impl Tool {
 pub const AVAILABLE_TOOLS: &[Tool] = &[
     Tool {
         id: "tcp_udp_test",
-        name: "TCP/UDP 测试",
+        name: "网络调试工具",
         icon: CustomIconName::IconName(IconName::SquareTerminal),
-        description: "网络调试工具，支持 TCP/UDP 客户端和服务端",
+        description: "支持 TCP/UDP 客户端和服务端模式，快速验证网络通信逻辑和数据格式。",
     },
     Tool {
         id: "ip_scanner",
-        name: "IP 地址扫描",
+        name: "IP 地址探测",
         icon: CustomIconName::IconName(IconName::Network),
-        description: "检查指定 IP 网段的网络可达性",
+        description: "支持IP网段、连续IP地址、单个IP地址扫描检查其IP是否正在使用。",
     },
     Tool {
         id: "ip_calculator",
-        name: "IP 地址计算器",
+        name: "IP 计算器",
         icon: CustomIconName::Calculator,
-        description: "快速计算 IP 网络信息",
+        description: "支持输入IP/mask 或 IP/subnet来计算其网络信息。",
     },
 ];
 
