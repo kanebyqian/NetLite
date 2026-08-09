@@ -1,3 +1,4 @@
 docs/
 target/
 CLAUDE.md
+.playwright-mcp/
