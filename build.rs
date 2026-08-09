@@ -22,7 +22,7 @@ fn main() {
         res.set_version_info(winres::VersionInfo::FILEVERSION, 0x0001000000000000);
         res.set("ProductName", "NetLite");
         res.set("CompanyName", "sunjary");
-        res.set("FileDescription", "NetLite 网络调试工具");
+        res.set("FileDescription", "NetLite");
         res.set("LegalCopyright", "Copyright (c) 2024 sunjary");
         res.set("InternalName", "NetLite");
         res.set("OriginalFilename", "NetLite.exe");
