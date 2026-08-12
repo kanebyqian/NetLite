@@ -16,8 +16,10 @@ use std::net::SocketAddr;
 use std::thread;
 use std::time::{Duration, Instant};
 use socket2::{Protocol, Socket, Type};
-use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
-use std::sync::Mutex;
+
+/// 跨网段探测使用的探测端口列表（仅用于无 ICMP 权限时的最后降级方案）
+/// 选择这些端口是因为它们在不产生实际流量的情况下可以快速失败（RST）
+const CROSS_SUBNET_PORTS: [u16; 4] = [135u16, 139u16, 445u16, 3389u16];
 
 use crate::app::NetLiteApp;
 
@@ -233,7 +235,7 @@ impl<'a> IpScannerTool<'a> {
                                     .text_sm()
                                     .font_medium()
                                     .text_color(theme.background)
-                                    .child(if is_scanning { "扫描中..." } else { "扫描" }),
+                                    .child(if is_scanning { "扫描中…" } else { "扫描" }),
                             )
                             .on_mouse_down(MouseButton::Left, cx.listener(
                                 move |app: &mut NetLiteApp, _event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<NetLiteApp>| {
@@ -282,13 +284,13 @@ impl<'a> IpScannerTool<'a> {
                                     let count = scan_query.count;
 
                                     // 使用 Arc<Mutex<Vec>> 作为共享结果缓冲区
-                                    let results_shared = Arc::new(Mutex::new(
+                                    let results_shared = std::sync::Arc::new(std::sync::Mutex::new(
                                         vec![(None, None); count]
                                     ));
-                                    let latencies_shared = Arc::new(Mutex::new(
+                                    let latencies_shared = std::sync::Arc::new(std::sync::Mutex::new(
                                         vec![None; count]
                                     ));
-                                    let completed = Arc::new(AtomicUsize::new(0));
+                                    let completed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
                                     let total = count;
 
                                     // 启动扫描线程
@@ -309,7 +311,7 @@ impl<'a> IpScannerTool<'a> {
                                     let state = state.clone();
                                     cx.spawn(async move |_this, cx| {
                                         loop {
-                                            let done = completed.load(Ordering::SeqCst);
+                                            let done = completed.load(std::sync::atomic::Ordering::SeqCst);
                                             if done >= total {
                                                 break;
                                             }
@@ -447,10 +449,10 @@ impl<'a> IpScannerTool<'a> {
                     .tooltip(move |window, cx| {
                         let full_ip = format!("{}.{}", prefix, ip_suffix);
                         let status_text = match status {
-                            IpStatus::Up => "正常",
-                            IpStatus::Down => "不可达",
-                            IpStatus::Scanning => "扫描中",
-                            IpStatus::Unknown => "未检测",
+                            IpStatus::Up => "● 正常",
+                            IpStatus::Down => "● 不可达",
+                            IpStatus::Scanning => "● 扫描中",
+                            IpStatus::Unknown => "● 未检测",
                         };
                         let latency = lat.get(idx).and_then(|d| {
                             d.map(|d| format!(" 响应时间 {} ms", d.as_millis()))
@@ -493,9 +495,9 @@ struct ScanQuery {
 }
 
 /// 从查询字符串解析为扫描目标（支持 CIDR、单 IP、IP 范围）
-/// - CIDR: `192.168.1.0/24` -> 解析为 /24 网段
-/// - 单 IP: `192.168.1.1` -> 自动补全为 /24 网段
-/// - IP 范围: `192.168.1.1-192.168.1.100` -> 解析为指定范围
+/// - CIDR: `192.168.1.0/24` → 解析为 /24 网段
+/// - 单 IP: `192.168.1.1` → 自动补全为 /24 网段
+/// - IP 范围: `192.168.1.1-192.168.1.100` → 解析为指定范围
 fn parse_scan_query(query: &str) -> Option<ScanQuery> {
     let query = query.trim();
     if query.is_empty() {
@@ -551,7 +553,7 @@ fn parse_scan_query(query: &str) -> Option<ScanQuery> {
         }
     }
 
-    // 4. 单 IP 格式: 192.168.1.1 -> 只扫描该地址（排除 .0 和 .255）
+    // 4. 单 IP 格式: 192.168.1.1 → 只扫描该地址（排除 .0 和 .255）
     if let Ok(addr) = query.parse::<Ipv4Addr>() {
         if addr.octets()[3] != 0 && addr.octets()[3] != 255 {
             return Some(ScanQuery {
@@ -610,7 +612,7 @@ impl IpScannerState {
     }
 }
 
-// ---- 网络环境检测 ----
+// ---- 探测方法选择 ----
 
 /// 检查目标 IP 是否与本机同网段（同一子网）
 /// 如果掩码无效（如 0.0.0.0），统一返回 false，回退使用 ping
@@ -666,7 +668,7 @@ fn get_local_ip_and_mask() -> Option<(Ipv4Addr, Ipv4Addr)> {
                 }
 
                 // 遍历 IP 地址链表
-                let mut addr_curr: *mut winapi::um::iptypes::IP_ADDR_STRING = std::ptr::addr_of!(adapter.IpAddressList) as *mut _;
+                let mut addr_curr: *mut winapi::um::iptypes::IP_ADDR_STRING = ptr::addr_of!(adapter.IpAddressList) as *mut _;
                 while !addr_curr.is_null() {
                     let entry = &*addr_curr;
                     // IpAddress.String 是 CHAR[16]，如 "192.168.1.100"
@@ -739,202 +741,193 @@ fn mask_prefix_to_u8(mask: Ipv4Addr) -> u8 {
     val.leading_zeros() as u8
 }
 
-// ---- 并行多探针探测 ----
-
-/// 探针类型
-#[derive(Clone, Copy)]
-enum ProbeKind {
-    /// ARP 探针对同二层 IPv4
-    Arp,
-    /// ICMP Echo Request
-    Icmp,
-    /// TCP SYN 到指定端口
-    TcpSyn(u16),
-}
-
-/// 探针探测链：按网络环境选择不同的探测顺序
-#[derive(Clone)]
-struct ProbeChain {
-    same_subnet: Vec<ProbeKind>,
-    cross_subnet: Vec<ProbeKind>,
-}
-
-// Note: ProbeChain construction is done inline in init_probe_chains()
-
-static PROBE_CHAIN_SAME: std::sync::OnceLock<ProbeChain> = std::sync::OnceLock::new();
-static PROBE_CHAIN_CROSS: std::sync::OnceLock<ProbeChain> = std::sync::OnceLock::new();
-
-fn init_probe_chains() {
-    // 同二层：ARP → ICMP → TCP 443/80/22
-    let same = ProbeChain {
-        same_subnet: vec![
-            ProbeKind::Arp,
-            ProbeKind::Icmp,
-            ProbeKind::TcpSyn(443),
-            ProbeKind::TcpSyn(80),
-            ProbeKind::TcpSyn(22),
-        ],
-        cross_subnet: vec![],
+/// 探测单个 IP（智能选择 ARP 或 ping）
+fn probe_ip(ip: Ipv4Addr, local_ip: Option<Ipv4Addr>, local_mask: Option<Ipv4Addr>) -> Result<Duration, anyhow::Error> {
+    // 如果提供了本机 IP 和掩码，判断是否同网段
+    let (local_ip, local_mask) = match (local_ip, local_mask) {
+        (Some(lip), Some(lmsk)) => (lip, lmsk),
+        _ => {
+            // 没有本地接口信息，直接用 ping
+            return probe_ip_ping(ip);
+        }
     };
-    PROBE_CHAIN_SAME.get_or_init(|| same.clone());
-    // 跨网段：ICMP → TCP 443/80/8080/22
-    let cross = ProbeChain {
-        same_subnet: vec![],
-        cross_subnet: vec![
-            ProbeKind::Icmp,
-            ProbeKind::TcpSyn(443),
-            ProbeKind::TcpSyn(80),
-            ProbeKind::TcpSyn(8080),
-            ProbeKind::TcpSyn(22),
-        ],
-    };
-    PROBE_CHAIN_CROSS.get_or_init(|| cross.clone());
-}
 
-/// 并行多探针探测单个 IP
-/// 任意一个探针成功即标记存活并取消其他探针
-fn probe_ip_parallel(
-    ip: Ipv4Addr,
-    local_ip: Ipv4Addr,
-    local_mask: Ipv4Addr,
-) -> Result<Duration, anyhow::Error> {
-    let chain = if is_same_subnet(local_ip, local_mask, ip) {
-        PROBE_CHAIN_SAME.get().unwrap()
+    if is_same_subnet(local_ip, local_mask, ip) {
+        // 同网段 → 使用 ARP
+        probe_ip_arp(ip)
     } else {
-        PROBE_CHAIN_CROSS.get().unwrap()
+        // 跨网段 → 使用 ping
+        probe_ip_ping(ip)
+    }
+}
+
+// ---- 同网段 ARP 探测（SendARP，无需管理员权限） ----
+
+/// 使用 SendARP 探测单个 IP（Windows 专用，仅同网段）
+/// 返回 Ok(duration) 表示可达，Err 表示不可达
+#[cfg(target_os = "windows")]
+fn probe_ip_arp(ip: Ipv4Addr) -> Result<Duration, anyhow::Error> {
+    let start = Instant::now();
+
+    // SendARP 签名:
+    // DWORD SendARP(IPAddr DestIP, IPAddr SrcIP, PVOID pMacAddr, PULONG PhyAddrLen)
+    // DestIP: 目标 IP (网络字节序 u32)
+    // SrcIP:  源 IP，0 = 自动选择出口接口 (网络字节序 u32)
+    // pMacAddr: 输出缓冲区，至少 8 字节，存放 MAC 地址
+    // PhyAddrLen: 输入时指定缓冲区大小，输出时写入实际长度
+    const MAC_BUF_SIZE: usize = 8;
+    let mut mac_buf: [u8; MAC_BUF_SIZE] = [0; MAC_BUF_SIZE];
+    let mut mac_len = MAC_BUF_SIZE as u32;
+
+    // 将 IPv4 地址转为网络字节序 u32（大端序）
+    let dest_ip_u32 = ip.octets()[0] as u32
+        | (ip.octets()[1] as u32) << 8
+        | (ip.octets()[2] as u32) << 16
+        | (ip.octets()[3] as u32) << 24;
+    // SrcIP = 0 表示让系统自动选择出口接口
+    let src_ip_u32 = 0;
+
+    let result = unsafe {
+        winapi::um::iphlpapi::SendARP(
+            dest_ip_u32,
+            src_ip_u32,
+            mac_buf.as_mut_ptr() as *mut winapi::ctypes::c_void,
+            &mut mac_len,
+        )
     };
-    let probes = if is_same_subnet(local_ip, local_mask, ip) {
-        &chain.same_subnet
+
+    let elapsed = start.elapsed();
+
+    // ERROR_SUCCESS = 0
+    if result == 0 {
+        debug!("IP扫描: {} 可达 (ARP, MAC={:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X})",
+            ip, mac_buf[0], mac_buf[1], mac_buf[2], mac_buf[3], mac_buf[4], mac_buf[5]);
+        Ok(elapsed)
     } else {
-        &chain.cross_subnet
-    };
+        debug!("IP扫描: {} 不可达 (SendARP 返回 {})", ip, result);
+        Err(anyhow::anyhow!("SendARP failed with code {}", result))
+    }
+}
 
-    // 取消信号：任一探针成功即广播取消
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let results_shared = Arc::new(Mutex::new(Vec::new()));
-    let completed = Arc::new(AtomicUsize::new(0));
-    let total = probes.len();
+/// Linux/macOS 下的 ARP 探测（ping 回退）
+#[cfg(not(target_os = "windows"))]
+fn probe_ip_arp(ip: Ipv4Addr) -> Result<Duration, anyhow::Error> {
+    probe_ip_ping(ip)
+}
 
-    let handles: Vec<_> = probes.iter().enumerate().map(|(i, kind)| {
-        let ip = ip;
-        let cancelled = cancelled.clone();
+/// 实时扫描（共享状态版本）：每个 IP 探测完成后写入共享 Vec
+fn scan_network_realtime_into(
+    scan_query: ScanQuery,
+    results_shared: std::sync::Arc<std::sync::Mutex<Vec<(Option<IpStatus>, Option<Duration>)>>>,
+    latencies_shared: std::sync::Arc<std::sync::Mutex<Vec<Option<Duration>>>>,
+    completed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    _total: usize,
+) {
+    let ScanQuery {
+        prefix,
+        first_ip,
+        last_ip,
+        count: _count,
+    } = scan_query;
+
+    let parts: Vec<u8> = prefix
+        .split('.')
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if parts.len() != 3 {
+        return;
+    }
+
+    let first = first_ip.octets()[3];
+    let last = last_ip.octets()[3];
+
+    let (local_ip, local_mask) = get_local_ip_and_mask().unwrap_or((Ipv4Addr::UNSPECIFIED, Ipv4Addr::UNSPECIFIED));
+
+    let concurrency = 64;
+    let mut handles = Vec::new();
+
+    for octet in first..=last {
+        let target_ip = Ipv4Addr::new(parts[0], parts[1], parts[2], octet);
+        let idx = (octet - first) as usize;
+
+        let probe_method = if local_ip != Ipv4Addr::UNSPECIFIED
+            && is_same_subnet(local_ip, local_mask, target_ip)
+        {
+            "arp"
+        } else {
+            "ping"
+        };
+
+        let local_ip = local_ip;
+        let local_mask = local_mask;
         let results_shared = results_shared.clone();
+        let latencies_shared = latencies_shared.clone();
         let completed = completed.clone();
-        let _total = total;
-        let timeout = Duration::from_millis(800);
 
-        thread::spawn(move || {
-            // 先检查是否有其他探针已完成
-            if cancelled.load(Ordering::SeqCst) {
-                completed.fetch_add(1, Ordering::SeqCst);
-                return;
-            }
-
-            let result = match kind {
-                ProbeKind::Arp => probe_arp(ip),
-                ProbeKind::Icmp => probe_icmp_echo(ip, timeout),
-                ProbeKind::TcpSyn(port) => probe_tcp_syn(ip, timeout, *port),
+        handles.push(thread::spawn(move || {
+            debug!("IP扫描: {} ({}) 开始探测", target_ip, probe_method);
+            let result = probe_ip(target_ip, Some(local_ip), Some(local_mask));
+            let (status, latency) = match result {
+                Ok(dur) => {
+                    debug!("IP扫描: {} 可达", target_ip);
+                    (IpStatus::Up, Some(dur))
+                }
+                Err(e) => {
+                    debug!("IP扫描: {} 不可达 ({})", target_ip, e);
+                    (IpStatus::Down, None)
+                }
             };
-
-            // 如果已成功则设置取消信号
-            if result.is_ok() {
-                cancelled.store(true, Ordering::SeqCst);
-            }
-
-            // 记录结果
+            // 写入共享结果
             {
                 let mut r = results_shared.lock().unwrap();
-                r.push((i, result));
+                r[idx] = (Some(status), latency);
             }
-            completed.fetch_add(1, Ordering::SeqCst);
-        })
-    }).collect();
+            {
+                let mut l = latencies_shared.lock().unwrap();
+                l[idx] = latency;
+            }
+            completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (idx, status, latency)
+        }));
 
-    // 等待所有探针完成（或早已被取消）
+        if handles.len() >= concurrency {
+            for handle in handles.drain(..) {
+                let _ = handle.join();
+            }
+        }
+    }
+
     for handle in handles {
         let _ = handle.join();
     }
-
-    // 取第一个成功结果
-    let r = results_shared.lock().unwrap();
-    for (_, result) in r.iter() {
-        if let Ok(dur) = result {
-            return Ok(*dur);
-        }
-    }
-
-    // 所有探针均失败
-    Err(anyhow::anyhow!("{}: 所有探针均不可达", ip))
 }
 
-/// ARP 探测（同二层 IPv4）
-fn probe_arp(target: Ipv4Addr) -> Result<Duration, anyhow::Error> {
-    let start = Instant::now();
-
-    #[cfg(target_os = "windows")]
-    {
-        const MAC_BUF_SIZE: usize = 8;
-        let mut mac_buf: [u8; MAC_BUF_SIZE] = [0; MAC_BUF_SIZE];
-        let mut mac_len = MAC_BUF_SIZE as u32;
-
-        let dest_ip_u32 = target.octets()[0] as u32
-            | (target.octets()[1] as u32) << 8
-            | (target.octets()[2] as u32) << 16
-            | (target.octets()[3] as u32) << 24;
-
-        let result = unsafe {
-            winapi::um::iphlpapi::SendARP(
-                dest_ip_u32,
-                0,
-                mac_buf.as_mut_ptr() as *mut winapi::ctypes::c_void,
-                &mut mac_len,
-            )
-        };
-
-        let elapsed = start.elapsed();
-
-        if result == 0 {
-            debug!("IP扫描: {} 可达 (ARP, MAC={:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X})",
-                target, mac_buf[0], mac_buf[1], mac_buf[2], mac_buf[3], mac_buf[4], mac_buf[5]);
-            Ok(elapsed)
-        } else {
-            debug!("IP扫描: {} 不可达 (SendARP 返回 {})", target, result);
-            Err(anyhow::anyhow!("SendARP failed with code {}", result))
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        // 非 Windows 平台：ARP 不可用，直接返回失败
-        debug!("IP扫描: {} ARP 不可用（非 Windows）", target);
-        Err(anyhow::anyhow!("ARP not available on this platform"))
-    }
-}
-
-/// ICMP Echo Request 探测
-fn probe_icmp_echo(target: Ipv4Addr, timeout: Duration) -> Result<Duration, anyhow::Error> {
+/// 探测单个 IP 是否可达（阻塞式，超时 3000ms）
+/// 优先使用原始 ICMP Socket，无权限时降级为 Windows IcmpSendEcho2
+fn probe_ip_ping(ip: Ipv4Addr) -> Result<Duration, anyhow::Error> {
     // 优先尝试原始 ICMP Socket
-    match probe_icmp_raw(target, timeout) {
+    match probe_ip_icmp_raw(ip, Duration::from_millis(3000)) {
         Ok(dur) => return Ok(dur),
         Err(e) => {
-            debug!("IP扫描: {} ICMP raw socket 失败，降级: {}", target, e);
+            debug!("IP扫描: ICMP 原始 Socket 探测失败，降级为 IcmpSendEcho2: {}", e);
         }
     }
 
-    // 降级：Windows IcmpSendEcho
+    // 降级：使用 Windows IP Helper API（无需管理员权限，不弹命令行窗口）
     #[cfg(target_os = "windows")]
-    match probe_icmp_winapi(target, timeout) {
+    match probe_ip_icmp_winapi(ip, Duration::from_millis(3000)) {
         Ok(dur) => return Ok(dur),
         Err(e) => {
-            debug!("IP扫描: {} IcmpSendEcho 失败: {}", target, e);
+            debug!("IP扫描: IcmpSendEcho2 探测失败: {}", e);
         }
     }
 
-    Err(anyhow::anyhow!("{}: ICMP 探测失败（无权限且无 API）", target))
+    // 最终降级：TCP SYN 到常见管理端口（RST 即表示主机存活）
+    probe_ip_tcp_syn_multi(ip, CROSS_SUBNET_PORTS)
 }
 
 /// 使用原始 ICMP Socket 发送 Echo Request 并等待 Reply
-fn probe_icmp_raw(target: Ipv4Addr, timeout: Duration) -> Result<Duration, anyhow::Error> {
+fn probe_ip_icmp_raw(target: Ipv4Addr, timeout: Duration) -> Result<Duration, anyhow::Error> {
     let start = Instant::now();
 
     let mut sock = match Socket::new(
@@ -1006,13 +999,18 @@ fn icmp_checksum(data: &[u8]) -> u16 {
     !sum as u16
 }
 
-/// 使用 Windows IcmpSendEcho 探测（无需管理员权限）
+/// 使用 Windows icmpapi.dll IcmpSendEcho2 探测（无需管理员权限）
+/// 这是 ping.exe 底层使用的 API，不会弹出命令行窗口
 #[cfg(target_os = "windows")]
-fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, anyhow::Error> {
+fn probe_ip_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, anyhow::Error> {
+    use std::os::raw::c_void;
     use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
 
     let start = Instant::now();
 
+    // 使用 iphlpapi.dll 中的 IcmpCreateFile / IcmpSendEcho2 / IcmpCloseHandle
+    // 注意：必须从 iphlpapi.dll 加载，而非 icmpapi.dll（Vista+ 已合并）
     let dll: Vec<u16> = std::ffi::OsStr::new("iphlpapi.dll")
         .encode_wide()
         .chain(Some(0))
@@ -1024,12 +1022,15 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
 
     unsafe {
         let n1: Vec<u8> = b"IcmpCreateFile\0".to_vec();
-        let n2: Vec<u8> = b"IcmpSendEcho\0".to_vec();
+        let n2: Vec<u8> = b"IcmpSendEcho2\0".to_vec();
         let n3: Vec<u8> = b"IcmpCloseHandle\0".to_vec();
 
         let addr1 = winapi::um::libloaderapi::GetProcAddress(icmp_dll as *mut _, n1.as_ptr() as *const i8);
+        debug!("IP扫描: GetProcAddress(IcmpCreateFile) = {:?}", addr1);
         let addr2 = winapi::um::libloaderapi::GetProcAddress(icmp_dll as *mut _, n2.as_ptr() as *const i8);
+        debug!("IP扫描: GetProcAddress(IcmpSendEcho2) = {:?}", addr2);
         let addr3 = winapi::um::libloaderapi::GetProcAddress(icmp_dll as *mut _, n3.as_ptr() as *const i8);
+        debug!("IP扫描: GetProcAddress(IcmpCloseHandle) = {:?}", addr3);
 
         if addr1.is_null() || addr2.is_null() || addr3.is_null() {
             winapi::um::libloaderapi::FreeLibrary(icmp_dll as *mut _);
@@ -1050,6 +1051,8 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
         // 构造 ICMP echo request（至少 8 字节）
         let request_data: [u8; 8] = [0xA; 8];
 
+        // ICMP_ECHO_REPLY 结构体（64位 x64 对齐）
+        // 与 iphlpapi.h 中 ICMP_ECHO_REPLY 定义一致
         #[repr(C)]
         struct IcmpEchoReply {
             Address: u32,
@@ -1057,6 +1060,7 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
             RoundTripTime: u32,
             DataSize: u16,
             Reserved: u16,
+            // pData 是可变长度数据，这里用 u64 占位（x64 上是 8 字节指针）
             pData: u64,
         }
 
@@ -1064,6 +1068,20 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
         let mut reply_buf: Vec<u8> = vec![0u8; reply_size];
         let target_ip = u32::from(target);
 
+        // 关键：使用 IcmpSendEcho 而非 IcmpSendEcho2（签名简单，不会崩溃）
+        // DWORD IcmpSendEcho(HANDLE, ULONG, PVOID, WORD, PIP_OPTION_INFORMATION, PVOID, DWORD, DWORD)
+        // 从 iphlpapi.dll 导出
+        let n4: Vec<u8> = b"IcmpSendEcho\0".to_vec();
+        let addr4 = winapi::um::libloaderapi::GetProcAddress(icmp_dll as *mut _, n4.as_ptr() as *const i8);
+        debug!("IP扫描: GetProcAddress(IcmpSendEcho) = {:?}", addr4);
+
+        if addr4.is_null() {
+            icmph_close(icmp_handle);
+            winapi::um::libloaderapi::FreeLibrary(icmp_dll as *mut _);
+            return Err(anyhow::anyhow!("iphlpapi.dll 中 IcmpSendEcho 导出缺失"));
+        }
+
+        // PIP_OPTION_INFORMATION: 用于设置 TTL，设为 null 使用默认值
         let options: IPOptionInfo = IPOptionInfo {
             Ttl: 64,
             Tos: 0,
@@ -1072,7 +1090,6 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
             OptionsSize: 0,
         };
 
-        // DWORD IcmpSendEcho(HANDLE, ULONG, PVOID, WORD, PIP_OPTION_INFORMATION, PVOID, DWORD, DWORD)
         let send_fn: unsafe extern "system" fn(
             usize,        // IcmpHandle
             u32,          // Address (目标 IP, 主机字节序)
@@ -1082,7 +1099,7 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
             *mut u8,      // ReplyBuffer
             u32,          // ReplySize
             u32,          // Timeout (毫秒)
-        ) -> u32 /* DWORD (成功返回的回复数) */ = std::mem::transmute(addr2);
+        ) -> u32 /* DWORD (成功返回的回复数) */ = std::mem::transmute(addr4);
 
         let reply_count = send_fn(
             icmp_handle,
@@ -1108,7 +1125,7 @@ fn probe_icmp_winapi(target: Ipv4Addr, timeout: Duration) -> Result<Duration, an
         } else {
             let reply = &*(reply_buf.as_ptr() as *const IcmpEchoReply);
             if reply.Status == 0 {
-                debug!("IP扫描: {} 可达 (IcmpSendEcho)", target);
+                debug!("IP扫描: {} 可达 (IcmpSendEcho, TTL={}ms)", target, reply.RoundTripTime);
                 Ok(start.elapsed())
             } else {
                 Err(anyhow::anyhow!("IcmpSendEcho Status={}", reply.Status))
@@ -1128,12 +1145,34 @@ struct IPOptionInfo {
     OptionsData: u64,
 }
 
+
+/// 多端口 TCP SYN 探测（最终降级方案）
+/// 尝试常见管理/共享端口，任一 RST 或成功连接即判存活
+fn probe_ip_tcp_syn_multi(target: Ipv4Addr, ports: [u16; 4]) -> Result<Duration, anyhow::Error> {
+    let handles: Vec<_> = ports
+        .iter()
+        .map(|&port| {
+            let ip = target;
+            let timeout = Duration::from_millis(500);
+            thread::spawn(move || probe_ip_tcp_syn(ip, timeout, port))
+        })
+        .collect();
+
+    for handle in handles {
+        match handle.join().unwrap_or_else(|e| {
+            Err(anyhow::anyhow!("探测线程 panicked: {:?}", e))
+        }) {
+            Ok(dur) => return Ok(dur),
+            Err(_) => continue,
+        }
+    }
+
+    Err(anyhow::anyhow!("{}: 多端口 TCP SYN 均不可达", target))
+}
+
 /// TCP SYN 探测（底层实现）
 /// 尝试 TCP 连接到指定端口，RST 响应表示主机存活但端口未开放
-/// 使用阻塞 Socket + set_write_timeout 实现超时控制
-fn probe_tcp_syn(target: Ipv4Addr, timeout: Duration, port: u16) -> Result<Duration, anyhow::Error> {
-    let start = Instant::now();
-
+fn probe_ip_tcp_syn(target: Ipv4Addr, timeout: Duration, port: u16) -> Result<Duration, anyhow::Error> {
     let sock = Socket::new(
         socket2::Domain::IPV4,
         Type::STREAM,
@@ -1141,106 +1180,26 @@ fn probe_tcp_syn(target: Ipv4Addr, timeout: Duration, port: u16) -> Result<Durat
     )
     .map_err(|e| anyhow::anyhow!("创建 TCP Socket 失败: {}", e))?;
 
-    // 设置写超时（connect 的超时）
+    // 设置超时
     sock.set_write_timeout(Some(timeout))
         .map_err(|e| anyhow::anyhow!("设置写超时失败: {}", e))?;
 
     let addr: SocketAddr = (target, port).into();
+    let start = Instant::now();
     match sock.connect(&addr.into()) {
         Ok(()) => {
-            // 连接成功 - 主机存活
+            // 连接成功 — 主机存活
             debug!("IP扫描: {} 可达 (TCP port {}, 连接成功)", target, port);
             Ok(start.elapsed())
         }
         Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
-            // RST - 主机存活但端口未开放
-            debug!("IP扫描: {} 可达 (TCP port {}, RST)", target, port);
+            // RST — 主机存活但端口未开放，说明目标可达
+            debug!("IP扫描: {} 可达 (TCP port {}, RST 响应)", target, port);
             Ok(start.elapsed())
         }
         Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-            Err(anyhow::anyhow!("TCP SYN 探测超时 (port {})", port))
+            Err(anyhow::anyhow!("TCP SYN 探测超时"))
         }
         Err(e) => Err(anyhow::anyhow!("TCP SYN 探测失败: {}", e)),
-    }
-}
-
-/// 实时扫描（共享状态版本）：每个 IP 并行多探针探测
-fn scan_network_realtime_into(
-    scan_query: ScanQuery,
-    results_shared: Arc<Mutex<Vec<(Option<IpStatus>, Option<Duration>)>>>,
-    latencies_shared: Arc<Mutex<Vec<Option<Duration>>>>,
-    completed: Arc<AtomicUsize>,
-    _total: usize,
-) {
-    let ScanQuery {
-        prefix,
-        first_ip,
-        last_ip,
-        count: _count,
-    } = scan_query;
-
-    let parts: Vec<u8> = prefix
-        .split('.')
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    if parts.len() != 3 {
-        return;
-    }
-
-    let first = first_ip.octets()[3];
-    let last = last_ip.octets()[3];
-
-    let (local_ip, local_mask) = get_local_ip_and_mask().unwrap_or((Ipv4Addr::UNSPECIFIED, Ipv4Addr::UNSPECIFIED));
-
-    // 初始化探测链
-    init_probe_chains();
-
-    let concurrency = 64;
-    let mut handles = Vec::new();
-
-    for octet in first..=last {
-        let target_ip = Ipv4Addr::new(parts[0], parts[1], parts[2], octet);
-        let idx = (octet - first) as usize;
-
-        let local_ip = local_ip;
-        let local_mask = local_mask;
-        let results_shared = results_shared.clone();
-        let latencies_shared = latencies_shared.clone();
-        let completed = completed.clone();
-
-        handles.push(thread::spawn(move || {
-            debug!("IP扫描: {} 开始并行多探针探测", target_ip);
-            let result = probe_ip_parallel(target_ip, local_ip, local_mask);
-            let (status, latency) = match result {
-                Ok(dur) => {
-                    debug!("IP扫描: {} 存活", target_ip);
-                    (IpStatus::Up, Some(dur))
-                }
-                Err(e) => {
-                    debug!("IP扫描: {} 不可达 ({})", target_ip, e);
-                    (IpStatus::Down, None)
-                }
-            };
-            // 写入共享结果
-            {
-                let mut r = results_shared.lock().unwrap();
-                r[idx] = (Some(status), latency);
-            }
-            {
-                let mut l = latencies_shared.lock().unwrap();
-                l[idx] = latency;
-            }
-            completed.fetch_add(1, Ordering::SeqCst);
-        }));
-
-        if handles.len() >= concurrency {
-            for handle in handles.drain(..) {
-                let _ = handle.join();
-            }
-        }
-    }
-
-    for handle in handles {
-        let _ = handle.join();
     }
 }
