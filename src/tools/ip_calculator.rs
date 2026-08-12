@@ -4,18 +4,11 @@ use gpui::*;
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::StyledExt;
 use gpui_component::input::Input;
-use gpui_component::ActiveTheme;
-use gpui_component::Icon;
+use gpui_component::{ActiveTheme, Icon};
+use gpui_component::clipboard::Clipboard;
 use crate::custom_icons::CustomIconName;
 use ipnet::Ipv4Net;
 use std::net::Ipv4Addr;
-use std::time::Duration;
-
-/// 复制按钮状态（在 Window 中存储）
-#[derive(Default)]
-struct CopyButtonState {
-    copied: bool,
-}
 
 use crate::app::NetLiteApp;
 
@@ -334,7 +327,7 @@ impl<'a> IpCalculatorTool<'a> {
                                         .child("地址范围"),
                                 )
                                 .child(
-                                    Self::render_copy_button(ElementId::Name("copy-all-ranges".into()), r_clone.all_ranges_text.clone(), &theme, window, cx),
+                                    Self::render_copy_button(r_clone.all_ranges_text.clone()),
                                 ),
                         )
                         .children(vec![
@@ -458,48 +451,11 @@ impl<'a> IpCalculatorTool<'a> {
             )
     }
 
-    /// 复制按钮：悬停显示 Copy，点击后显示 Copied
+    /// 复制按钮：使用 Clipboard 组件，图标在 Copy/Check 之间切换
     fn render_copy_button(
-        id: ElementId,
         value: String,
-        theme: &gpui_component::Theme,
-        window: &mut Window,
-        cx: &mut Context<NetLiteApp>,
-    ) -> AnyElement {
-        let state = window.use_keyed_state(id.clone(), cx, |_, _| CopyButtonState::default());
-        let copied = state.read(cx).copied;
-        let text = if copied { "Copied" } else { "Copy" };
-        let value_clone = value.clone();
-
-        div()
-            .id(id.clone())
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .hover(|s| s.bg(theme.secondary).text_color(theme.foreground))
-            .on_click({
-                let state = state.clone();
-                move |_, window, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(value_clone.clone()));
-                    state.update(cx, |state, cx| {
-                        state.copied = true;
-                        cx.notify();
-                    });
-                    let state = state.clone();
-                    cx.spawn(async move |cx| {
-                        cx.background_executor().timer(Duration::from_secs(1)).await;
-                        let _ = state.update(cx, |state, cx| {
-                            state.copied = false;
-                            cx.notify();
-                        });
-                    })
-                    .detach();
-                }
-            })
-            .child(text)
-            .into_any_element()
+    ) -> impl IntoElement {
+        Clipboard::new(ElementId::Name("copy-btn".into()))
+            .value(value)
     }
 }
