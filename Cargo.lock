@@ -24,6 +24,7 @@ dependencies = [
  "serde_json",
  "simple_logger",
  "smol",
+ "socket2",
  "textwrap",
  "thiserror 1.0.69",
  "tokio",

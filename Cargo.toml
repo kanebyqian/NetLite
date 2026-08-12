@@ -1,9 +1,10 @@
 [package]
 name = "NetLite"
-version = "0.1.0"
+version = "0.1.16"
 edition = "2024"
 
 [dependencies]
+socket2 = "0.6"
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", features = ["tree-sitter"] }
@@ -26,7 +27,7 @@ textwrap = "0.16"
 rust-embed = "8.0.0"
 lazy_static = "1.4"
 ipnet = { version = "2.0", features = ["serde"] }
-winapi = { version = "0.3", features = ["iphlpapi", "winerror", "ws2tcpip", "ws2def", "ws2ipdef", "iptypes"] }
+winapi = { version = "0.3", features = ["iphlpapi", "winerror", "ws2tcpip", "ws2def", "ws2ipdef", "iptypes", "libloaderapi", "minwindef"] }
 rfd = "0.15"
 dirs = "5"
 
