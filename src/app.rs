@@ -13,6 +13,7 @@ use crate::tools::CurrentView;
 
 use crate::tools::ip_scanner::IpScannerState;
 use crate::tools::ip_calculator::IpCalculatorState;
+use crate::tools::syslog_server::SyslogServerState;
 use crate::ui::connection_tab::ConnectionTabState;
 use crate::ui::main_window::MainWindow;
 
@@ -117,6 +118,11 @@ pub struct NetLiteApp {
     pub ip_scanner_state: Entity<IpScannerState>,
     pub ip_calculator_input: Entity<InputState>,
     pub ip_calculator_state: Entity<IpCalculatorState>,
+    // Syslog 服务器工具：输入 + 状态
+    pub syslog_ip_input: Entity<InputState>,
+    pub syslog_port_input: Entity<InputState>,
+    pub syslog_search_input: Entity<InputState>,
+    pub syslog_server_state: Entity<SyslogServerState>,
 }
 
 impl NetLiteApp {
@@ -131,6 +137,13 @@ impl NetLiteApp {
         let ip_scanner_state = cx.new(|cx| IpScannerState::new(cx));
         let ip_calculator_input = cx.new(|cx| InputState::new(window, cx));
         let ip_calculator_state = cx.new(|cx| IpCalculatorState::new(cx));
+        let syslog_ip_input = cx.new(|cx| InputState::new(window, cx));
+        let syslog_port_input = cx.new(|cx| InputState::new(window, cx));
+        let syslog_search_input = cx.new(|cx| InputState::new(window, cx));
+        let syslog_server_state = cx.new(|cx| SyslogServerState::new(cx));
+        // Syslog 服务器默认配置：监听 IP 0.0.0.0，端口 514（协议由 SyslogServerState 默认为 UDP）
+        syslog_ip_input.update(cx, |i, cx| i.set_value("0.0.0.0".to_string(), window, cx));
+        syslog_port_input.update(cx, |i, cx| i.set_value("514".to_string(), window, cx));
 
         // 初始化空的连接标签页状态（不预先创建）
         let connection_tabs = HashMap::new();
@@ -218,6 +231,11 @@ impl NetLiteApp {
             // IP 地址计算器工具
             ip_calculator_input,
             ip_calculator_state,
+            // Syslog 服务器工具
+            syslog_ip_input,
+            syslog_port_input,
+            syslog_search_input,
+            syslog_server_state,
         };
 
         // 创建专门的异步任务来处理连接事件

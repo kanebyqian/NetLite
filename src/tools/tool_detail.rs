@@ -93,6 +93,9 @@ impl<'a> ToolDetailView<'a> {
             "ip_calculator" => div().flex().flex_col().flex_1().child(
                 crate::tools::ip_calculator::IpCalculatorTool::new(self.app).render(window, cx),
             ),
+            "syslog_server" => div().flex().flex_col().flex_1().child(
+                crate::tools::syslog_server::SyslogServerTool::new(self.app).render(window, cx),
+            ),
             _ => div().flex().flex_col().flex_1().child(
                 self.render_placeholder(cx),
             ),

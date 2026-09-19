@@ -85,6 +85,7 @@ Click a tool card on the home page:
 
 - **IP Address Calculator**: Enter `IP/prefix` or `IP/subnet`, e.g., `192.168.1.0/24`, `10.0.0.0/255.0.0.0`
 - **IP Address Scanner**: Enter a CIDR, range, or single IP, e.g., `192.168.1.0/24`, `192.168.1.1-100`, `192.168.1.1`
+- **Syslog Server**: A lightweight, out-of-the-box Syslog receiver and raw log viewer that receives and displays raw logs sent by devices in real time
 
 ## Project Structure
 

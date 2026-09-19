@@ -3,6 +3,7 @@ pub mod tool_detail;
 pub mod tcp_udp_test;
 pub mod ip_scanner;
 pub mod ip_calculator;
+pub mod syslog_server;
 
 use crate::custom_icons::CustomIconName;
 use gpui_component::IconName;
@@ -46,6 +47,12 @@ pub const AVAILABLE_TOOLS: &[Tool] = &[
         name: "IP 计算器",
         icon: CustomIconName::Calculator,
         description: "支持输入IP/mask 或 IP/subnet来计算其网络信息。",
+    },
+    Tool {
+        id: "syslog_server",
+        name: "Syslog 服务器",
+        icon: CustomIconName::IconName(IconName::Inbox),
+        description: "开箱即用的轻量级 Syslog 接收器与原始日志查看器，实时接收并展示设备发送的原始日志。",
     },
 ];
 
