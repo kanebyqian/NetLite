@@ -14,6 +14,7 @@ use crate::tools::CurrentView;
 use crate::tools::ip_scanner::IpScannerState;
 use crate::tools::ip_calculator::IpCalculatorState;
 use crate::tools::syslog_server::SyslogServerState;
+use crate::tools::file_server::FileServerState;
 use crate::ui::connection_tab::ConnectionTabState;
 use crate::ui::main_window::MainWindow;
 
@@ -123,6 +124,16 @@ pub struct NetLiteApp {
     pub syslog_port_input: Entity<InputState>,
     pub syslog_search_input: Entity<InputState>,
     pub syslog_server_state: Entity<SyslogServerState>,
+    // FTP / TFTP 服务器工具：输入 + 状态
+    pub file_server_ip_input: Entity<InputState>,
+    pub file_server_port_input: Entity<InputState>,
+    pub file_server_tftp_port_input: Entity<InputState>,
+    pub file_server_username_input: Entity<InputState>,
+    pub file_server_password_input: Entity<InputState>,
+    pub file_server_passive_start_input: Entity<InputState>,
+    pub file_server_passive_end_input: Entity<InputState>,
+    pub file_server_timeout_input: Entity<InputState>,
+    pub file_server_state: Entity<FileServerState>,
 }
 
 impl NetLiteApp {
@@ -144,6 +155,25 @@ impl NetLiteApp {
         // Syslog 服务器默认配置：监听 IP 0.0.0.0，端口 514（协议由 SyslogServerState 默认为 UDP）
         syslog_ip_input.update(cx, |i, cx| i.set_value("0.0.0.0".to_string(), window, cx));
         syslog_port_input.update(cx, |i, cx| i.set_value("514".to_string(), window, cx));
+
+        // FTP / TFTP 服务器默认配置：FTP 端口 21、TFTP 端口 69、用户名 netlite、被动端口 50000-50100、超时 30s
+        let file_server_ip_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_port_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_tftp_port_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_username_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_password_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_passive_start_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_passive_end_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_timeout_input = cx.new(|cx| InputState::new(window, cx));
+        let file_server_state = cx.new(|cx| FileServerState::new(cx));
+        file_server_ip_input.update(cx, |i, cx| i.set_value("0.0.0.0".to_string(), window, cx));
+        file_server_port_input.update(cx, |i, cx| i.set_value("21".to_string(), window, cx));
+        file_server_tftp_port_input.update(cx, |i, cx| i.set_value("69".to_string(), window, cx));
+        file_server_username_input.update(cx, |i, cx| i.set_value("netlite".to_string(), window, cx));
+        file_server_password_input.update(cx, |i, cx| i.set_value("netlite".to_string(), window, cx));
+        file_server_passive_start_input.update(cx, |i, cx| i.set_value("50000".to_string(), window, cx));
+        file_server_passive_end_input.update(cx, |i, cx| i.set_value("50100".to_string(), window, cx));
+        file_server_timeout_input.update(cx, |i, cx| i.set_value("30".to_string(), window, cx));
 
         // 初始化空的连接标签页状态（不预先创建）
         let connection_tabs = HashMap::new();
@@ -236,6 +266,16 @@ impl NetLiteApp {
             syslog_port_input,
             syslog_search_input,
             syslog_server_state,
+            // FTP / TFTP 服务器工具：输入 + 状态
+            file_server_ip_input,
+            file_server_port_input,
+            file_server_tftp_port_input,
+            file_server_username_input,
+            file_server_password_input,
+            file_server_passive_start_input,
+            file_server_passive_end_input,
+            file_server_timeout_input,
+            file_server_state,
         };
 
         // 创建专门的异步任务来处理连接事件

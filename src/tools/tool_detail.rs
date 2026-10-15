@@ -96,6 +96,9 @@ impl<'a> ToolDetailView<'a> {
             "syslog_server" => div().flex().flex_col().flex_1().child(
                 crate::tools::syslog_server::SyslogServerTool::new(self.app).render(window, cx),
             ),
+            "file_server" => div().flex().flex_col().flex_1().child(
+                crate::tools::file_server::FileServerTool::new(self.app).render(window, cx),
+            ),
             _ => div().flex().flex_col().flex_1().child(
                 self.render_placeholder(cx),
             ),

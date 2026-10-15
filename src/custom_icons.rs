@@ -12,6 +12,7 @@ pub enum CustomIconName {
     Pencil,
     Braces,
     Minimize2,
+    FileServer,
 }
 
 impl From<IconName> for CustomIconName {
@@ -31,6 +32,7 @@ impl IconNamed for CustomIconName {
             CustomIconName::Pencil => "icons/pencil.svg".into(),
             CustomIconName::Braces => "icons/braces.svg".into(),
             CustomIconName::Minimize2 => "icons/minimize-2.svg".into(),
+            CustomIconName::FileServer => "icons/file-server.svg".into(),
         }
     }
 }
