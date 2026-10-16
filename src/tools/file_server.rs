@@ -151,71 +151,126 @@ struct DirRow {
     modified: String,
 }
 
+/// 单个 FTP/TFTP 服务器的运行时状态 + 配置 + 统计
+///
+/// 每个协议独立拥有一份：运行标志、运行状态、错误信息、上传/下载权限，以及由服务端线程写入、
+/// 轮询任务合并进 UI 的共享统计与记录。两个服务器互不干扰，可独立启停或同时运行。
+struct ServerInstance {
+    /// 协议（启动后固定为 FTP 或 TFTP）
+    protocol: FileProtocol,
+    /// 运行标志（true=运行中；stop 时置 false，服务端线程与轮询任务据此退出）
+    running: Arc<AtomicBool>,
+    /// 运行状态
+    status: FileServerStatus,
+    /// 错误信息（如端口被占用、密码为空）
+    error_message: Option<String>,
+    /// 允许上传
+    allow_upload: bool,
+    /// 允许下载
+    allow_download: bool,
+    /// 共享统计（由服务端线程写入，轮询任务合并进 UI）
+    stats: Arc<Mutex<SharedStats>>,
+    /// 共享记录（由服务端线程写入，轮询任务拖进 UI）
+    records: Arc<Mutex<VecDeque<TransferRecord>>>,
+    /// 运行时统计（UI 展示）
+    active_connections: u32,
+    upload_count: u64,
+    download_count: u64,
+    uploaded_bytes: u64,
+    downloaded_bytes: u64,
+}
+
+impl ServerInstance {
+    fn new(protocol: FileProtocol) -> Self {
+        Self {
+            protocol,
+            running: Arc::new(AtomicBool::new(false)),
+            status: FileServerStatus::Stopped,
+            error_message: None,
+            allow_upload: true,
+            allow_download: true,
+            stats: Arc::new(Mutex::new(SharedStats::default())),
+            records: Arc::new(Mutex::new(VecDeque::new())),
+            active_connections: 0,
+            upload_count: 0,
+            download_count: 0,
+            uploaded_bytes: 0,
+            downloaded_bytes: 0,
+        }
+    }
+
+    /// 是否运行中（Running / Starting）
+    fn is_running(&self) -> bool {
+        matches!(self.status, FileServerStatus::Running | FileServerStatus::Starting)
+    }
+
+    /// 合并后台线程写入的统计到 UI 展示字段
+    fn merge_stats(&mut self) {
+        if let Ok(stats) = self.stats.lock() {
+            self.active_connections = stats.active_connections;
+            self.upload_count = stats.upload_count;
+            self.download_count = stats.download_count;
+            self.uploaded_bytes = stats.uploaded_bytes;
+            self.downloaded_bytes = stats.downloaded_bytes;
+        }
+    }
+
+    /// 把后台线程写入的记录拖出（空则返回空 vec）
+    fn drain_records(&mut self) -> Vec<TransferRecord> {
+        if let Ok(mut shared) = self.records.lock() {
+            if shared.is_empty() {
+                Vec::new()
+            } else {
+                shared.drain(..).collect()
+            }
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+/// 按协议取出可变的服务器实例
+fn server_mut(s: &mut FileServerState, protocol: FileProtocol) -> Option<&mut ServerInstance> {
+    match protocol {
+        FileProtocol::FTP => Some(&mut s.ftp_server),
+        FileProtocol::TFTP => Some(&mut s.tftp_server),
+    }
+}
+
 /// FTP / TFTP 服务器的状态
 pub struct FileServerState {
-    /// 服务运行状态
-    pub status: FileServerStatus,
-    /// 错误信息（如端口被占用、密码为空）
-    pub error_message: Option<String>,
-    /// 当前协议
-    pub protocol: FileProtocol,
-    /// 根目录
+    /// FTP 服务器运行时状态
+    pub ftp_server: ServerInstance,
+    /// TFTP 服务器运行时状态
+    pub tftp_server: ServerInstance,
+    /// 当前选中的服务器标签（FTP / TFTP），用于切换配置面板
+    pub viewed_protocol: FileProtocol,
+    /// 根目录（两个服务共用同一共享目录）
     pub root_directory: PathBuf,
-    /// 允许上传
-    pub allow_upload: bool,
-    /// 允许下载
-    pub allow_download: bool,
-
-    /// 运行时统计
-    pub active_connections: u32,
-    pub upload_count: u64,
-    pub download_count: u64,
-    pub uploaded_bytes: u64,
-    pub downloaded_bytes: u64,
-
-    /// 传输记录（受 MAX_RECORDS 限制）
+    /// 传输记录（受 MAX_RECORDS 限制；含 FTP/TFTP，按 protocol 区分）
     pub records: Vec<TransferRecord>,
-
     /// 共享目录当前内容（运行时自动刷新）
     pub directory: Vec<DirRow>,
-
     /// 高级配置是否展开
     pub advanced_open: bool,
     /// 是否展示传输详情
     pub show_detail: bool,
     /// 当前选中的传输记录索引
     pub selected_record: Option<usize>,
-
-    /// 后台运行的运行标志
-    pub running: Arc<AtomicBool>,
-    /// 共享统计
-    pub stats_shared: Arc<Mutex<SharedStats>>,
-    /// 共享记录
-    pub records_shared: Arc<Mutex<VecDeque<TransferRecord>>>,
 }
 
 impl FileServerState {
     pub fn new(_cx: &mut Context<Self>) -> Self {
         Self {
-            status: FileServerStatus::Stopped,
-            error_message: None,
-            protocol: FileProtocol::FTP,
+            ftp_server: ServerInstance::new(FileProtocol::FTP),
+            tftp_server: ServerInstance::new(FileProtocol::TFTP),
+            viewed_protocol: FileProtocol::FTP,
             root_directory: PathBuf::from("."),
-            allow_upload: true,
-            allow_download: true,
-            active_connections: 0,
-            upload_count: 0,
-            download_count: 0,
-            uploaded_bytes: 0,
-            downloaded_bytes: 0,
             records: Vec::new(),
             directory: Vec::new(),
             advanced_open: false,
             show_detail: false,
             selected_record: None,
-            running: Arc::new(AtomicBool::new(false)),
-            stats_shared: Arc::new(Mutex::new(SharedStats::default())),
-            records_shared: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -233,48 +288,38 @@ impl FileServerState {
         self.directory = list_directory(&self.root_directory);
     }
 
-    /// 合并后台线程写入的统计与记录到 UI 状态
-    fn merge_shared(&mut self) {
-        if let Ok(stats) = self.stats_shared.lock() {
-            self.active_connections = stats.active_connections;
-            self.upload_count = stats.upload_count;
-            self.download_count = stats.download_count;
-            self.uploaded_bytes = stats.uploaded_bytes;
-            self.downloaded_bytes = stats.downloaded_bytes;
-        }
-        let drained: Vec<TransferRecord> = {
-            if let Ok(mut shared) = self.records_shared.lock() {
-                if shared.is_empty() {
-                    Vec::new()
-                } else {
-                    shared.drain(..).collect()
-                }
-            } else {
-                Vec::new()
+    /// 置单个服务器为失败态并提示（内部辅助）
+    fn set_failed(state: &Entity<FileServerState>, protocol: FileProtocol, message: &str, cx: &mut Context<NetLiteApp>) {
+        state.update(cx, |s, _| {
+            if let Some(server) = server_mut(s, protocol) {
+                server.error_message = Some(message.to_string());
+                server.status = FileServerStatus::Failed;
             }
-        };
-        for record in drained {
-            self.append_record(record);
-        }
+        });
+        cx.notify();
     }
 
-    /// 启动服务：读取配置 → 绑定 → 启动服务端线程 → 启动轮询任务
-    pub fn start_service(app: &NetLiteApp, state: &Entity<FileServerState>, cx: &mut Context<NetLiteApp>) {
-        // 读取配置
-        let ip_str = app.file_server_ip_input.read_with(cx, |i, _| i.text().to_string());
-        let ip_str = ip_str.trim();
+    /// 启动服务：读取配置 → 绑定 → 启动服务端线程 → 启动轮询任务（按协议独立启停）
+    pub fn start_service(
+        protocol: FileProtocol,
+        app: &NetLiteApp,
+        state: &Entity<FileServerState>,
+        cx: &mut Context<NetLiteApp>,
+    ) {
+        // 读取共享监听 IP
+        let ip_str = app
+            .file_server_ip_input
+            .read_with(cx, |i, _| i.text().to_string())
+            .trim()
+            .to_string();
         let listen_ip: Ipv4Addr = match ip_str.parse() {
             Ok(ip) => ip,
             Err(_) => {
-                state.update(cx, |s, _| {
-                    s.error_message = Some("监听 IP 格式错误".into());
-                    s.status = FileServerStatus::Failed;
-                });
-                cx.notify();
+                Self::set_failed(state, protocol, "监听 IP 格式错误", cx);
                 return;
             }
         };
-        let protocol = state.read_with(cx, |s, _| s.protocol);
+
         // 端口按当前协议从对应配置读取（FTP / TFTP 各自独立）
         let port_text = match protocol {
             FileProtocol::FTP => app.file_server_port_input.read_with(cx, |i, _| i.text().to_string()),
@@ -283,63 +328,79 @@ impl FileServerState {
         let port: u16 = match port_text.trim().parse() {
             Ok(p) if (1..=65535).contains(&p) => p,
             _ => {
-                state.update(cx, |s, _| {
-                    s.error_message = Some("端口无效，请输入 1-65535".into());
-                    s.status = FileServerStatus::Failed;
-                });
-                cx.notify();
+                Self::set_failed(state, protocol, "端口无效，请输入 1-65535", cx);
                 return;
             }
         };
-        let username = app.file_server_username_input.read_with(cx, |i, _| i.text().to_string());
-        let password = app.file_server_password_input.read_with(cx, |i, _| i.text().to_string());
-        let passive_start: u16 = app
-            .file_server_passive_start_input
-            .read_with(cx, |i, _| i.text().to_string().trim().parse::<u16>().unwrap_or(50000));
-        let passive_end: u16 = app
-            .file_server_passive_end_input
-            .read_with(cx, |i, _| i.text().to_string().trim().parse::<u16>().unwrap_or(50100));
-        let timeout_secs: u64 = app
-            .file_server_timeout_input
-            .read_with(cx, |i, _| i.text().to_string().trim().parse::<u64>().unwrap_or(30));
 
-        let (root_directory, allow_upload, allow_download, stats_shared, records_shared, running) = state.read_with(cx, |s, _| {
+        // 协议专属配置：FTP 带用户名/密码/被动范围；TFTP 带超时
+        let (username, password, passive_start, passive_end, timeout_secs) = match protocol {
+            FileProtocol::FTP => (
+                app.file_server_username_input.read_with(cx, |i, _| i.text().to_string()),
+                app.file_server_password_input.read_with(cx, |i, _| i.text().to_string()),
+                app
+                    .file_server_passive_start_input
+                    .read_with(cx, |i, _| i.text().to_string().trim().parse::<u16>().unwrap_or(50000)),
+                app
+                    .file_server_passive_end_input
+                    .read_with(cx, |i, _| i.text().to_string().trim().parse::<u16>().unwrap_or(50100)),
+                0,
+            ),
+            FileProtocol::TFTP => (
+                String::new(),
+                String::new(),
+                50000,
+                50100,
+                app
+                    .file_server_timeout_input
+                    .read_with(cx, |i, _| i.text().to_string().trim().parse::<u64>().unwrap_or(30)),
+            ),
+        };
+
+        // 读取共用根目录与各服务器的权限/统计/记录/运行标志
+        let (root_directory, allow_upload, allow_download, stats, records, running) = state.read_with(cx, |s, _| {
+            let server = match protocol {
+                FileProtocol::FTP => &s.ftp_server,
+                FileProtocol::TFTP => &s.tftp_server,
+            };
             (
                 s.root_directory.clone(),
-                s.allow_upload,
-                s.allow_download,
-                s.stats_shared.clone(),
-                s.records_shared.clone(),
-                s.running.clone(),
+                server.allow_upload,
+                server.allow_download,
+                server.stats.clone(),
+                server.records.clone(),
+                server.running.clone(),
             )
         });
 
         if passive_start > passive_end {
-            state.update(cx, |s, _| {
-                s.error_message = Some("被动端口范围无效（起始 > 结束）".into());
-                s.status = FileServerStatus::Failed;
-            });
-            cx.notify();
+            Self::set_failed(state, protocol, "被动端口范围无效（起始 > 结束）", cx);
             return;
         }
         if !root_directory.is_dir() {
-            state.update(cx, |s, _| {
-                s.error_message = Some("文件目录不存在或不是目录".into());
-                s.status = FileServerStatus::Failed;
-            });
-            cx.notify();
+            Self::set_failed(state, protocol, "文件目录不存在或不是目录", cx);
             return;
         }
         // FTP：设置了用户名或密码时，二者都必须提供
         if protocol == FileProtocol::FTP && (!username.is_empty() || !password.is_empty()) && (username.is_empty() || password.is_empty()) {
-            state.update(cx, |s, _| {
-                s.error_message = Some("FTP 用户名与密码需同时填写".into());
-                s.status = FileServerStatus::Failed;
-            });
-            cx.notify();
+            Self::set_failed(state, protocol, "FTP 用户名与密码需同时填写", cx);
             return;
         }
 
+        // 绑定套接字（失败直接返回，无需另设错误通道）
+        let bound: std::io::Result<BindSocket> = match protocol {
+            FileProtocol::FTP => TcpListener::bind((listen_ip, port)).map(BindSocket::Tcp),
+            FileProtocol::TFTP => UdpSocket::bind((listen_ip, port)).map(BindSocket::Udp),
+        };
+        let socket = match bound {
+            Ok(s) => s,
+            Err(e) => {
+                Self::set_failed(state, protocol, &format!("绑定失败：{e}"), cx);
+                return;
+            }
+        };
+
+        // 组装服务端上下文并启动对应协议
         let ctx = ServerContext {
             root: Arc::new(root_directory.clone()),
             protocol,
@@ -353,38 +414,35 @@ impl FileServerState {
             },
             allow_upload,
             allow_download,
-            stats: stats_shared,
-            records: records_shared,
+            stats,
+            records,
             running,
         };
 
-        // 绑定套接字（失败直接返回，无需另设错误通道）
-        let bound: std::io::Result<BindSocket> = match protocol {
-            FileProtocol::FTP => TcpListener::bind((listen_ip, port)).map(BindSocket::Tcp),
-            FileProtocol::TFTP => UdpSocket::bind((listen_ip, port)).map(BindSocket::Udp),
-        };
-        let socket = match bound {
-            Ok(s) => s,
-            Err(e) => {
-                state.update(cx, |s, _| {
-                    s.error_message = Some(format!("绑定失败：{e}"));
-                    s.status = FileServerStatus::Failed;
-                });
-                cx.notify();
-                return;
-            }
-        };
+        Self::start_one(cx, state, protocol, ctx, socket);
+    }
 
+    /// 启动单个服务端：置状态 → 起阻塞 I/O 线程 → 起轮询合并任务（仅更新本服务器）
+    fn start_one(
+        cx: &mut Context<NetLiteApp>,
+        state: &Entity<FileServerState>,
+        protocol: FileProtocol,
+        ctx: ServerContext,
+        socket: BindSocket,
+    ) {
         // 置为启动中并标记运行中
         state.update(cx, |s, _| {
-            s.status = FileServerStatus::Starting;
-            s.error_message = None;
-            s.running.store(true, Ordering::Relaxed);
+            if let Some(server) = server_mut(s, protocol) {
+                server.status = FileServerStatus::Starting;
+                server.error_message = None;
+                server.running.store(true, Ordering::Relaxed);
+            }
         });
         cx.notify();
 
         // 服务端线程（阻塞 I/O）
         let server_ctx = Arc::new(ctx);
+        let protocol = server_ctx.protocol;
         let server_ctx_thread = server_ctx.clone();
         thread::spawn(move || match (&socket, protocol) {
             (BindSocket::Tcp(l), FileProtocol::FTP) => {
@@ -396,20 +454,27 @@ impl FileServerState {
             _ => {}
         });
 
-        // 轮询任务：合并统计与记录，运行标志置 false 时退出
+        // 轮询任务：合并本服务器的统计与记录，运行标志置 false 时退出
         let p_state = state.clone();
         let p_running = server_ctx.running.clone();
-        let p_stats = server_ctx.stats.clone();
-        let p_records = server_ctx.records.clone();
         cx.spawn(async move |_, cx| {
             loop {
                 smol::Timer::after(Duration::from_millis(POLL_INTERVAL_MS)).await;
                 let stopped = !p_running.load(Ordering::Relaxed);
-                p_state.update(cx, |s, _| s.merge_shared());
+                p_state.update(cx, |s, _| {
+                    if let Some(server) = server_mut(s, protocol) {
+                        server.merge_stats();
+                        for record in server.drain_records() {
+                            s.append_record(record);
+                        }
+                    }
+                });
                 if stopped {
                     p_state.update(cx, |s, _| {
-                        s.status = FileServerStatus::Stopped;
-                        s.error_message = None;
+                        if let Some(server) = server_mut(s, protocol) {
+                            server.status = FileServerStatus::Stopped;
+                            server.error_message = None;
+                        }
                     });
                     break;
                 }
@@ -419,16 +484,25 @@ impl FileServerState {
         .detach();
 
         state.update(cx, |s, _| {
-            s.status = FileServerStatus::Running;
+            if let Some(server) = server_mut(s, protocol) {
+                server.status = FileServerStatus::Running;
+            }
         });
         cx.notify();
     }
 
-    /// 停止服务
-    pub fn stop_service(state: &Entity<FileServerState>, cx: &mut Context<NetLiteApp>) {
+    /// 停止服务（对外入口，按协议独立停止）
+    pub fn stop_service(protocol: FileProtocol, state: &Entity<FileServerState>, cx: &mut Context<NetLiteApp>) {
+        Self::stop_one(protocol, state, cx);
+    }
+
+    /// 停止单个服务端：停止运行标志并置为停止态
+    fn stop_one(protocol: FileProtocol, state: &Entity<FileServerState>, cx: &mut Context<NetLiteApp>) {
         state.update(cx, |s, _| {
-            s.running.store(false, Ordering::Relaxed);
-            s.status = FileServerStatus::Stopped;
+            if let Some(server) = server_mut(s, protocol) {
+                server.running.store(false, Ordering::Relaxed);
+                server.status = FileServerStatus::Stopped;
+            }
         });
         cx.notify();
     }
@@ -553,7 +627,6 @@ impl<'a> FileServerTool<'a> {
                             .flex()
                             .flex_col()
                             .child(Self::render_config_bar(state.clone(), app, cx))
-                            .child(Self::render_status_and_stats(state.clone(), cx))
                             .child(Self::render_body(state.clone(), cx)),
                     ),
             )
@@ -563,7 +636,24 @@ impl<'a> FileServerTool<'a> {
             .into_any_element()
     }
 
-    /// 顶部：服务配置 + 启动/停止
+    /// 配置分组：标题 + 内容
+    fn section(title: &str, content: impl IntoElement, theme: Theme) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .w_full()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_sm().font_semibold().text_color(theme.foreground).child(title.to_string())),
+            )
+            .child(content)
+    }
+
+    /// 顶部：协议选项卡 + 当前服务配置卡片
     fn render_config_bar(
         state: Entity<FileServerState>,
         app: &NetLiteApp,
@@ -571,9 +661,9 @@ impl<'a> FileServerTool<'a> {
     ) -> impl IntoElement {
         let s = state.read(cx);
         let theme = cx.theme().clone();
-        let is_running = s.status == FileServerStatus::Running || s.status == FileServerStatus::Starting;
-        let protocol = s.protocol;
-        let advanced_open = s.advanced_open;
+        let viewed = s.viewed_protocol;
+        let st = state.clone();
+        drop(s);
 
         div()
             .flex()
@@ -600,44 +690,110 @@ impl<'a> FileServerTool<'a> {
                                     .font_semibold()
                                     .text_color(theme.foreground)
                                     .child("服务配置"),
-                            )
-                            .child(Self::protocol_toggle(state.clone(), protocol, is_running, cx)),
+                            ),
                     )
+                    .child(Self::protocol_tab_bar(st.clone(), cx)),
             )
-            .child(
-                div()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.secondary)
-                    .px_4()
-                    .py_4()
-                    .gap_4()
-                    .flex()
-                    .flex_col()
-                    .child(Self::config_row_ip_port(state.clone(), app, is_running, cx))
-                    .child(Self::config_row_directory(state.clone(), is_running, cx))
-                    .when(protocol == FileProtocol::FTP, |div| {
-                        div.child(Self::config_row_ftp_auth(state.clone(), app, is_running, cx))
-                    })
-                    .child(Self::config_row_permissions(state.clone(), is_running, cx))
-                    .when(protocol == FileProtocol::FTP, |div| {
-                        div.child(Self::config_row_advanced(state.clone(), app, advanced_open, is_running, cx))
-                    })
-                    .child(Self::config_row_start(state.clone(), is_running, cx)),
-            )
-            .into_any_element()
+            .child(Self::server_card(viewed, st, app, cx))
+    }
+
+    /// 协议切换选项卡（FTP / TFTP）：可随时切换，不受运行状态限制
+    fn protocol_tab_bar(state: Entity<FileServerState>, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
+        let s = state.read(cx);
+        let theme = cx.theme().clone();
+        let viewed = s.viewed_protocol;
+        let st = state.clone();
+        drop(s);
+
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .rounded_md()
+            .bg(theme.secondary)
+            .p_1()
+            .child(Self::tab_option(FileProtocol::FTP, viewed == FileProtocol::FTP, &theme, st.clone(), cx))
+            .child(Self::tab_option(FileProtocol::TFTP, viewed == FileProtocol::TFTP, &theme, st.clone(), cx))
+    }
+
+    fn tab_option(protocol: FileProtocol, active: bool, theme: &Theme, state: Entity<FileServerState>, cx: &mut Context<NetLiteApp>) -> Div {
+        let label = match protocol {
+            FileProtocol::FTP => "FTP",
+            FileProtocol::TFTP => "TFTP",
+        };
+        let st = state.clone();
+        let protocol = protocol.clone();
+        div()
+            .cursor_pointer()
+            .px_3()
+            .py_1()
+            .rounded_sm()
+            .text_sm()
+            .font_medium()
+            .text_color(if active { theme.primary } else { theme.muted_foreground })
+            .bg(if active { theme.background } else { theme.secondary })
+            .child(label)
+            .on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| {
+                st.update(cx, |s, _| s.viewed_protocol = protocol.clone());
+                cx.notify();
+            }))
+    }
+
+    /// 单个服务器的完整配置卡片（配置 + 状态统计 + 启动/停止 + 错误提示）
+    fn server_card(
+        protocol: FileProtocol,
+        state: Entity<FileServerState>,
+        app: &NetLiteApp,
+        cx: &mut Context<NetLiteApp>,
+    ) -> impl IntoElement {
+        let s = state.read(cx);
+        let theme = cx.theme().clone();
+        let server = match protocol {
+            FileProtocol::FTP => &s.ftp_server,
+            FileProtocol::TFTP => &s.tftp_server,
+        };
+        let is_running = server.is_running();
+        let advanced_open = s.advanced_open;
+        let status = server.status;
+        let error = server.error_message.clone();
+        let st = state.clone();
+        drop(s);
+
+        div()
+            .rounded_lg()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.secondary)
+            .px_4()
+            .py_4()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(Self::section("网络设置", Self::config_row_ip_port(protocol.clone(), app, is_running, cx), theme.clone()))
+            .child(Self::section("共享目录", Self::config_row_directory(st.clone(), is_running, cx), theme.clone()))
+            .when(protocol == FileProtocol::FTP, |div| {
+                div.child(Self::section("登录认证", Self::config_row_ftp_auth(st.clone(), app, is_running, cx), theme.clone()))
+            })
+            .when(protocol == FileProtocol::TFTP, |div| {
+                div.child(Self::tftp_auth_warning(cx))
+            })
+            .child(Self::section("访问权限", Self::config_row_permissions(st.clone(), protocol.clone(), is_running, cx), theme.clone()))
+            .when(protocol == FileProtocol::FTP, |div| {
+                div.child(Self::section("高级配置", Self::config_row_advanced(st.clone(), app, advanced_open, is_running, cx), theme.clone()))
+            })
+            .child(Self::server_status_bar(protocol.clone(), st.clone(), cx))
+            .child(Self::render_error_section(error, theme.clone(), status))
+            .child(Self::bottom_control(st, protocol, is_running, cx))
     }
 
     /// 监听 IP + 端口行
     fn config_row_ip_port(
-        state: Entity<FileServerState>,
+        protocol: FileProtocol,
         app: &NetLiteApp,
         is_running: bool,
         cx: &mut Context<NetLiteApp>,
     ) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let protocol = state.read(cx).protocol;
         // FTP 与 TFTP 使用各自的端口配置（相互独立）
         let port_input: &Entity<InputState> = match protocol {
             FileProtocol::FTP => &app.file_server_port_input,
@@ -647,23 +803,27 @@ impl<'a> FileServerTool<'a> {
         div()
             .flex()
             .items_center()
-            .gap_3()
+            .gap_4()
             .w_full()
             .child(
                 div()
                     .flex()
+                    .flex_row()
                     .items_center()
                     .gap_2()
+                    .flex_1()
                     .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("监听 IP"))
-                    .child(Input::new(&app.file_server_ip_input).w_40().h_8().appearance(false).disabled(is_running)),
+                    .child(Input::new(&app.file_server_ip_input).h_8().appearance(false).bg(theme.background).border_1().border_color(theme.border).rounded_md().disabled(is_running).flex_1()),
             )
             .child(
                 div()
                     .flex()
+                    .flex_row()
                     .items_center()
                     .gap_2()
+                    .flex_1()
                     .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("端口"))
-                    .child(Input::new(port_input).w_20().h_8().appearance(false).disabled(is_running)),
+                    .child(Input::new(port_input).h_8().appearance(false).bg(theme.background).border_1().border_color(theme.border).rounded_md().disabled(is_running).flex_1()),
             )
             .into_any_element()
     }
@@ -680,15 +840,14 @@ impl<'a> FileServerTool<'a> {
         div()
             .flex()
             .items_center()
-            .gap_3()
+            .gap_2()
             .w_full()
             .child(
                 div()
-                    .w_24()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("文件目录")),
+                    .text_sm()
+                    .font_medium()
+                    .text_color(theme.muted_foreground)
+                    .child("根目录"),
             )
             .child(
                 div()
@@ -772,27 +931,35 @@ impl<'a> FileServerTool<'a> {
         div()
             .flex()
             .items_center()
-            .gap_3()
+            .gap_4()
             .w_full()
             .child(
                 div()
                     .flex()
+                    .flex_row()
                     .items_center()
                     .gap_2()
+                    .flex_1()
                     .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("用户名"))
-                    .child(Input::new(&username_input).w_40().h_8().appearance(false).disabled(running)),
+                    .child(Input::new(&username_input).h_8().appearance(false).bg(theme.background).border_1().border_color(theme.border).rounded_md().disabled(running).flex_1()),
             )
             .child(
                 div()
                     .flex()
+                    .flex_row()
                     .items_center()
                     .gap_2()
+                    .flex_1()
                     .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("密码"))
                     .child(
                         Input::new(&password_input)
-                            .w_40()
+                            .flex_1()
                             .h_8()
                             .appearance(false)
+                            .bg(theme.background)
+                            .border_1()
+                            .border_color(theme.border)
+                            .rounded_md()
                             .disabled(running)
                             .mask_toggle(),
                     ),
@@ -800,35 +967,36 @@ impl<'a> FileServerTool<'a> {
             .into_any_element()
     }
 
-    /// 允许上传 / 允许下载开关行
-    fn config_row_permissions(state: Entity<FileServerState>, is_running: bool, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
+    /// 允许上传 / 允许下载开关行（每个服务器独立保存权限）
+    fn config_row_permissions(
+        state: Entity<FileServerState>,
+        protocol: FileProtocol,
+        is_running: bool,
+        cx: &mut Context<NetLiteApp>,
+    ) -> impl IntoElement {
         let s = state.read(cx);
-        let theme = cx.theme().clone();
-        let allow_upload = s.allow_upload;
-        let allow_download = s.allow_download;
-        let st = state.clone();
+        let server = match protocol {
+            FileProtocol::FTP => &s.ftp_server,
+            FileProtocol::TFTP => &s.tftp_server,
+        };
+        let allow_upload = server.allow_upload;
+        let allow_download = server.allow_download;
         drop(s);
 
         div()
             .flex()
             .items_center()
-            .gap_3()
+            .gap_4()
             .w_full()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("权限")),
-            )
-            .child(Self::permission_toggle(state.clone(), "允许上传", allow_upload, is_running, cx))
-            .child(Self::permission_toggle(state.clone(), "允许下载", allow_download, is_running, cx))
+            .child(Self::permission_toggle(state.clone(), protocol, "允许上传", allow_upload, is_running, cx))
+            .child(Self::permission_toggle(state.clone(), protocol, "允许下载", allow_download, is_running, cx))
             .into_any_element()
     }
 
     /// 允许/允许下载单个开关
     fn permission_toggle(
         state: Entity<FileServerState>,
+        protocol: FileProtocol,
         label: &str,
         on: bool,
         is_running: bool,
@@ -854,10 +1022,12 @@ impl<'a> FileServerTool<'a> {
                 }
                 let st = state.clone();
                 st.update(cx, |s, _| {
-                    match label.as_str() {
-                        "允许上传" => s.allow_upload = !s.allow_upload,
-                        "允许下载" => s.allow_download = !s.allow_download,
-                        _ => {}
+                    if let Some(server) = server_mut(s, protocol) {
+                        match label.as_str() {
+                            "允许上传" => server.allow_upload = !server.allow_upload,
+                            "允许下载" => server.allow_download = !server.allow_download,
+                            _ => {}
+                        }
                     }
                 });
                 cx.notify();
@@ -885,28 +1055,14 @@ impl<'a> FileServerTool<'a> {
                 div()
                     .cursor_pointer()
                     .when(!running, |d| d.hover(|style| style.bg(theme.border)))
-                    .px_2()
-                    .py_1p5()
-                    .rounded_md()
                     .border_1()
                     .border_color(theme.border)
+                    .rounded_md()
                     .bg(theme.background)
+                    .p_3()
                     .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_medium()
-                            .text_color(theme.muted_foreground)
-                            .child("高级配置"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child(if advanced_open { "▾" } else { "▸" }),
-                    )
+                    .flex_col()
+                    .gap_2()
                     .on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| {
                         if running {
                             return;
@@ -915,7 +1071,34 @@ impl<'a> FileServerTool<'a> {
                             s.advanced_open = !s.advanced_open;
                         });
                         cx.notify();
-                    })),
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().text_sm().font_semibold().text_color(theme.foreground).child("⚙ 高级配置")),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(if advanced_open { "收起 ▾" } else { "展开 ›" }),
+                            )
+                    )
+                    .when(!advanced_open, |d| {
+                        d.child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child("被动模式、被动端口范围、连接超时"),
+                        )
+                    })
             )
             .when(advanced_open, |d| {
                 d.child(
@@ -931,14 +1114,14 @@ impl<'a> FileServerTool<'a> {
                                 .items_center()
                                 .gap_3()
                                 .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("被动端口范围"))
-                                .child(Input::new(&app.file_server_passive_start_input).w_16().h_8().appearance(false).disabled(running))
+                                .child(Input::new(&app.file_server_passive_start_input).w_16().h_8().appearance(false).bg(theme.background).border_1().border_color(theme.border).rounded_md().disabled(running))
                                 .child(
                                     div()
                                         .text_sm()
                                         .text_color(theme.muted_foreground)
                                         .child("—"),
                                 )
-                                .child(Input::new(&app.file_server_passive_end_input).w_16().h_8().appearance(false).disabled(running)),
+                                .child(Input::new(&app.file_server_passive_end_input).w_16().h_8().appearance(false).bg(theme.background).border_1().border_color(theme.border).rounded_md().disabled(running)),
                         )
                         .child(
                             div()
@@ -946,7 +1129,7 @@ impl<'a> FileServerTool<'a> {
                                 .items_center()
                                 .gap_3()
                                 .child(div().text_sm().font_medium().text_color(theme.muted_foreground).child("连接超时(秒)"))
-                                .child(Input::new(&app.file_server_timeout_input).w_16().h_8().appearance(false).disabled(running)),
+                                .child(Input::new(&app.file_server_timeout_input).w_16().h_8().appearance(false).bg(theme.background).border_1().border_color(theme.border).rounded_md().disabled(running)),
                         ),
                 )
             })
@@ -954,112 +1137,130 @@ impl<'a> FileServerTool<'a> {
     }
 
     /// 启动 / 停止按钮
-    fn config_row_start(state: Entity<FileServerState>, is_running: bool, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
-        let s = state.read(cx);
+    fn start_button(
+        state: Entity<FileServerState>,
+        protocol: FileProtocol,
+        is_running: bool,
+        cx: &mut Context<NetLiteApp>,
+    ) -> impl IntoElement {
         let theme = cx.theme().clone();
         let running = is_running;
         let st = state.clone();
-        drop(s);
+        let protocol = protocol.clone();
 
         div()
+            .cursor_pointer()
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .px_3()
+            .py_1p5()
+            .rounded_md()
+            .when(running, |d| {
+                d.bg(theme.danger)
+                    .hover(|style| style.bg(theme.danger.opacity(0.9)))
+            })
+            .when(!running, |d| {
+                d.bg(theme.primary)
+                    .hover(|style| style.bg(theme.primary.opacity(0.9)))
+            })
+            .text_sm()
+            .font_semibold()
+            .text_color(theme.background)
+            .child(if running { "停止服务" } else { "启动服务" })
+            .on_mouse_down(MouseButton::Left, cx.listener(move |app: &mut NetLiteApp, _, _, cx| {
+                let st = st.clone();
+                let protocol = protocol.clone();
+                let running = running;
+                if running {
+                    FileServerState::stop_service(protocol, &st, cx);
+                } else {
+                    FileServerState::start_service(protocol, app, &st, cx);
+                }
+            }))
+    }
+
+    /// 底部：分隔线 + 状态文本 + 启动/停止按钮
+    fn bottom_control(state: Entity<FileServerState>, protocol: FileProtocol, is_running: bool, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
+        let s = state.read(cx);
+        let theme = cx.theme().clone();
+        let server = match protocol {
+            FileProtocol::FTP => &s.ftp_server,
+            FileProtocol::TFTP => &s.tftp_server,
+        };
+        let status = server.status;
+        let st = state.clone();
+        drop(s);
+
+        let (status_text, status_color) = match status {
+            FileServerStatus::Stopped => ("服务尚未启动", theme.muted_foreground),
+            FileServerStatus::Starting => ("启动中…", theme.warning),
+            FileServerStatus::Running => ("运行中", theme.primary),
+            FileServerStatus::Stopping => ("停止中…", theme.warning),
+            FileServerStatus::Failed => ("错误", theme.danger_foreground),
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
             .w_full()
             .child(
                 div()
-                    .cursor_pointer()
+                    .h_px()
                     .w_full()
+                    .bg(theme.border),
+            )
+            .child(
+                div()
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .h_10()
-                    .rounded_md()
-                    .when(running, |d| {
-                        d.bg(theme.danger)
-                            .hover(|style| style.bg(theme.danger.opacity(0.9)))
-                    })
-                    .when(!running, |d| {
-                        d.bg(theme.primary)
-                            .hover(|style| style.bg(theme.primary.opacity(0.9)))
-                    })
-                    .text_sm()
-                    .font_semibold()
-                    .text_color(theme.background)
-                    .child(if running { "停止服务" } else { "启动服务" })
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |app: &mut NetLiteApp, _, _, cx| {
-                        let st = st.clone();
-                        let is_running = st.read_with(cx, |s, _| {
-                            s.status == FileServerStatus::Running || s.status == FileServerStatus::Starting
-                        });
-                        if is_running {
-                            FileServerState::stop_service(&st, cx);
-                        } else {
-                            FileServerState::start_service(app, &st, cx);
-                        }
-                    })),
+                    .justify_between()
+                    .w_full()
+                    .child(div().text_sm().font_medium().text_color(status_color).child(status_text))
+                    .child(Self::start_button(st, protocol, is_running, cx)),
             )
             .into_any_element()
     }
 
-    /// 协议切换（FTP / TFTP）
-    fn protocol_toggle(state: Entity<FileServerState>, protocol: FileProtocol, is_running: bool, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
+    /// TFTP 无身份认证警告
+    fn tftp_auth_warning(cx: &mut Context<NetLiteApp>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let st = state.clone();
-        let running = is_running;
-
         div()
-            .flex()
-            .items_center()
-            .gap_1()
             .rounded_md()
-            .bg(theme.secondary)
-            .p_1()
-            .when(running, |d| d.opacity(0.5))
-            .child(
-                Self::protocol_option(state.clone(), FileProtocol::FTP, protocol == FileProtocol::FTP, &theme, cx)
-                    .when(!running, |d| {
-                        let st = st.clone();
-                        d.on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| {
-                            st.update(cx, |s, _| s.protocol = FileProtocol::FTP);
-                            cx.notify();
-                        }))
-                    }),
-            )
-            .child(
-                Self::protocol_option(state.clone(), FileProtocol::TFTP, protocol == FileProtocol::TFTP, &theme, cx)
-                    .when(!running, |d| {
-                        let st = st.clone();
-                        d.on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| {
-                            st.update(cx, |s, _| s.protocol = FileProtocol::TFTP);
-                            cx.notify();
-                        }))
-                    }),
-            )
-    }
-
-    fn protocol_option(state: Entity<FileServerState>, protocol: FileProtocol, active: bool, theme: &Theme, cx: &mut Context<NetLiteApp>) -> Div {
-        let label = match protocol {
-            FileProtocol::FTP => "FTP",
-            FileProtocol::TFTP => "TFTP",
-        };
-        div()
+            .border_1()
+            .border_color(theme.warning)
+            .bg(theme.warning.opacity(0.1))
             .px_3()
-            .py_1()
-            .rounded_sm()
-            .text_sm()
-            .font_medium()
-            .text_color(if active { theme.primary } else { theme.muted_foreground })
-            .bg(if active { theme.background } else { theme.secondary })
-            .child(label)
+            .py_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().text_sm().text_color(theme.warning).child("⚠"))
+                    .child(div().text_sm().text_color(theme.warning).child("TFTP 不提供身份认证，请仅在可信网络中使用。")),
+            )
+            .into_any_element()
     }
 
-    /// 状态栏 + 统计（连接数 / 上行 / 下行）
-    fn render_status_and_stats(state: Entity<FileServerState>, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
+    /// 单服务：状态栏 + 统计（连接数 / 上行 / 下行）
+    fn server_status_bar(
+        protocol: FileProtocol,
+        state: Entity<FileServerState>,
+        cx: &mut Context<NetLiteApp>,
+    ) -> impl IntoElement {
         let s = state.read(cx);
         let theme = cx.theme().clone();
-        let status = s.status;
-        let connected = s.active_connections;
-        let tx = s.uploaded_bytes;
-        let rx = s.downloaded_bytes;
+        let server = match protocol {
+            FileProtocol::FTP => &s.ftp_server,
+            FileProtocol::TFTP => &s.tftp_server,
+        };
+        let status = server.status;
+        let connected = server.active_connections;
+        let tx = server.uploaded_bytes;
+        let rx = server.downloaded_bytes;
         drop(s);
 
         let (status_text, status_color) = match status {
@@ -1118,10 +1319,8 @@ impl<'a> FileServerTool<'a> {
     fn render_body(state: Entity<FileServerState>, cx: &mut Context<NetLiteApp>) -> impl IntoElement {
         let s = state.read(cx);
         let theme = cx.theme().clone();
-        let status = s.status;
         let directory = s.directory.clone();
         let records = s.records.clone();
-        let error = s.error_message.clone();
         drop(s);
 
         div()
@@ -1130,7 +1329,6 @@ impl<'a> FileServerTool<'a> {
             .gap_4()
             .p_4()
             .child(Self::render_directory_section(directory.clone(), theme.clone(), cx))
-            .child(Self::render_error_section(error.clone(), theme.clone(), status))
             .child(Self::render_records_section(records.clone(), theme.clone(), state.clone(), cx))
             .into_any_element()
     }
@@ -1167,10 +1365,10 @@ impl<'a> FileServerTool<'a> {
             )
             .child(
                 div()
+                    .h(px(360.0))
                     .overflow_y_scrollbar()
                     .overflow_x_hidden()
                     .w_full()
-                    .max_h_80()
                     .child(
                         if directory.is_empty() {
                             div()
@@ -1276,7 +1474,7 @@ impl<'a> FileServerTool<'a> {
             )
             .child(
                 div()
-                    .max_h(px(360.0))
+                    .h(px(360.0))
                     .overflow_y_scrollbar()
                     .overflow_x_hidden()
                     .w_full()

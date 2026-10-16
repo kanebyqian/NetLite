@@ -86,6 +86,7 @@ Click a tool card on the home page:
 - **IP Address Calculator**: Enter `IP/prefix` or `IP/subnet`, e.g., `192.168.1.0/24`, `10.0.0.0/255.0.0.0`
 - **IP Address Scanner**: Enter a CIDR, range, or single IP, e.g., `192.168.1.0/24`, `192.168.1.1-100`, `192.168.1.1`
 - **Syslog Server**: A lightweight, out-of-the-box Syslog receiver and raw log viewer that receives and displays raw logs sent by devices in real time
+- **FTP/TFTP Server**: A shared-directory file transfer service supporting both FTP and TFTP protocols. Each protocol gets its own config page (switchable via a tab bar at any time) and can run independently or both at once; includes upload/download permission control, FTP active/passive mode, and transfer record browsing
 
 ## Project Structure
 
